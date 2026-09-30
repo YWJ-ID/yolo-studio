@@ -1,0 +1,523 @@
+{
+    "openlabel": {
+        "metadata": {
+            "schema_version": "1.0.0",
+            "name": "gA_s1_attm_2020-01-01_driver_actions",
+            "annotator": "fixture"
+        },
+        "ontologies": {
+            "0": "http://dmd.vicomtech.org/ontology"
+        },
+        "streams": {
+            "general_camera": {
+                "description": "Unique general camera",
+                "uri": "sessionA.mp4",
+                "type": "camera",
+                "stream_properties": {
+                    "total_frames": 60,
+                    "sync": {
+                        "frame_shift": 0
+                    }
+                }
+            }
+        },
+        "actions": {
+            "0": {
+                "name": "",
+                "type": "driver_actions/safe_drive",
+                "frame_intervals": [
+                    {
+                        "frame_start": 0,
+                        "frame_end": 9
+                    }
+                ],
+                "ontology_uid": "0"
+            },
+            "1": {
+                "name": "",
+                "type": "driver_actions/texting_right",
+                "frame_intervals": [
+                    {
+                        "frame_start": 10,
+                        "frame_end": 29
+                    }
+                ],
+                "ontology_uid": "0"
+            },
+            "2": {
+                "name": "",
+                "type": "driver_actions/drinking",
+                "frame_intervals": [
+                    {
+                        "frame_start": 30,
+                        "frame_end": 34
+                    }
+                ],
+                "ontology_uid": "0"
+            },
+            "3": {
+                "name": "",
+                "type": "driver_actions/safe_drive",
+                "frame_intervals": [
+                    {
+                        "frame_start": 35,
+                        "frame_end": 59
+                    }
+                ],
+                "ontology_uid": "0"
+            },
+            "4": {
+                "name": "",
+                "type": "gaze_on_road/looking_road",
+                "frame_intervals": [
+                    {
+                        "frame_start": 0,
+                        "frame_end": 59
+                    }
+                ],
+                "ontology_uid": "0"
+            }
+        },
+        "frames": {
+            "0": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "1": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "2": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "3": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "4": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "5": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "6": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "7": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "8": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "9": {
+                "actions": {
+                    "0": {},
+                    "4": {}
+                }
+            },
+            "10": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "11": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "12": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "13": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "14": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "15": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "16": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "17": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "18": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "19": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "20": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "21": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "22": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "23": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "24": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "25": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "26": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "27": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "28": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "29": {
+                "actions": {
+                    "1": {},
+                    "4": {}
+                },
+                "objects": {
+                    "0": {}
+                }
+            },
+            "30": {
+                "actions": {
+                    "2": {},
+                    "4": {}
+                }
+            },
+            "31": {
+                "actions": {
+                    "2": {},
+                    "4": {}
+                }
+            },
+            "32": {
+                "actions": {
+                    "2": {},
+                    "4": {}
+                }
+            },
+            "33": {
+                "actions": {
+                    "2": {},
+                    "4": {}
+                }
+            },
+            "34": {
+                "actions": {
+                    "2": {},
+                    "4": {}
+                }
+            },
+            "35": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "36": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "37": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "38": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "39": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "40": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "41": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "42": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "43": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "44": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "45": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "46": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "47": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "48": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "49": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "50": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "51": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "52": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "53": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "54": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "55": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "56": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "57": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "58": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            },
+            "59": {
+                "actions": {
+                    "3": {},
+                    "4": {}
+                }
+            }
+        },
+        "frame_intervals": [
+            {
+                "frame_start": 0,
+                "frame_end": 59
+            }
+        ],
+        "objects": {
+            "0": {
+                "name": "",
+                "type": "cellphone",
+                "frame_intervals": [
+                    {
+                        "frame_start": 10,
+                        "frame_end": 29
+                    }
+                ],
+                "ontology_uid": "0"
+            }
+        }
+    }
+}

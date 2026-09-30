@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行时产物（数据集版本、训练结果、上传、数据库）
+backend/storage/
+!backend/storage/.gitkeep
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 模型权重
+*.pt
+*.onnx
+*.engine
+*.rknn
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+.DS_Store

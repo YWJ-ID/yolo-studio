@@ -1,0 +1,50 @@
+# YOLO Studio 后端依赖
+#
+# 安装：
+#   cd backend
+#   uv venv --python 3.9 .venv
+#   $env:VIRTUAL_ENV="<backend 绝对路径>\.venv"
+#   uv pip install -r requirements.txt
+
+# --- Web 层 ---
+fastapi>=0.110,<0.116
+uvicorn[standard]>=0.27
+pydantic>=2.5,<3
+pydantic-settings>=2.1
+python-multipart>=0.0.9
+websockets>=12.0
+
+# --- 数据层 ---
+PyYAML>=6.0
+Pillow>=9.0
+numpy>=1.23
+
+# --- 训练层 ---
+ultralytics>=8.2
+psutil>=5.9
+
+# --- 可选：GPU 监控（无 NVIDIA 卡可不装，代码会自动降级为 CPU 面板） ---
+# pynvml>=11.5
+
+# --- 可选：模型导出 ---
+# onnx>=1.15
+# onnxruntime>=1.17
+
+
+# ============================================================================
+# 关于 PyTorch / CUDA（部署到不同机器时必读）
+# ============================================================================
+# 上面的 `ultralytics` 会自动带上 PyPI 默认版 torch。
+#   * Windows / PyPI 默认 = **CPU 版**
+#   * Linux   / PyPI 默认 = 带 CUDA 的版本
+#
+# 如果需要指定 CUDA 版本（例如部署到带 N 卡的服务器），**先**单独装 torch：
+#
+#   CUDA 12.1:
+#     uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   CUDA 11.8:
+#     uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#   CPU（强制）:
+#     uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+# 再执行 uv pip install -r requirements.txt，uv 会复用已装的 torch 不再降级。
