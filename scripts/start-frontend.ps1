@@ -1,4 +1,4 @@
-# 启动前端（Vite，开发模式，热更新）
+﻿# 启动前端（Vite，开发模式，热更新）
 # 用法： powershell -ExecutionPolicy Bypass -File scripts\start-frontend.ps1
 
 $ErrorActionPreference = "Stop"

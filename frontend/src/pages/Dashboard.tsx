@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Card, Col, Descriptions, Row, Spin, Statistic, Table, Tag, Typography } from 'antd'
+import { Alert, Card, Col, Descriptions, Row, Spin, Table, Tag, Typography } from 'antd'
 import { api } from '../api/client'
 import type { AdapterInfo, EnvResponse, HealthResponse } from '../types'
 
@@ -73,35 +73,7 @@ export default function Dashboard() {
               ]}
             />
             <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-              当前骨架仅实现 YOLO 格式；COCO / VOC / LabelMe / OpenLABEL(DMD) 见任务 M1-03 ~ M1-06。
-            </Paragraph>
-          </Card>
-        </Col>
-
-        <Col span={24}>
-          <Card title="路线图" size="small">
-            <Row gutter={16}>
-              <Col xs={12} md={4}>
-                <Statistic title="M0 骨架" value="进行中" valueStyle={{ fontSize: 16 }} />
-              </Col>
-              <Col xs={12} md={4}>
-                <Statistic title="M1 数据模块" value="1/12" valueStyle={{ fontSize: 16 }} />
-              </Col>
-              <Col xs={12} md={4}>
-                <Statistic title="M2 训练模块" value="0/7" valueStyle={{ fontSize: 16 }} />
-              </Col>
-              <Col xs={12} md={4}>
-                <Statistic title="M3 评估/模型库" value="0/4" valueStyle={{ fontSize: 16 }} />
-              </Col>
-              <Col xs={12} md={4}>
-                <Statistic title="M4 部署导出" value="0/3" valueStyle={{ fontSize: 16 }} />
-              </Col>
-              <Col xs={12} md={4}>
-                <Statistic title="M5 前端界面" value="2/8" valueStyle={{ fontSize: 16 }} />
-              </Col>
-            </Row>
-            <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-              完整任务清单见项目根目录 <Text code>PROGRESS.md</Text>。
+              检测类格式（YOLO / COCO / VOC / LabelMe）落成检测布局；OpenLABEL(DMD) 为图像级分类，落成分类布局。
             </Paragraph>
           </Card>
         </Col>

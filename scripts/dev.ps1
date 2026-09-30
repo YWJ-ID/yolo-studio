@@ -1,4 +1,4 @@
-# 一键启动前后端开发环境（两个独立窗口）
+﻿# 一键启动前后端开发环境（两个独立窗口）
 # 用法： powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 #
 # 前后端分离：后端 8000，前端 5173（通过 Vite 代理调用 /api）

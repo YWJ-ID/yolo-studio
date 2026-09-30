@@ -57,15 +57,129 @@ const SEVERITY_META: Record<string, { color: string; label: string }> = {
 
 const SPLIT_KEYS = ['train', 'val', 'test'] as const
 
+/** 自定义映射的一行：把 from 改名为 to。 */
+interface CustomRule {
+  from: string
+  to: string
+}
+
+/**
+ * 任意类名映射编辑器。
+ *
+ * 系统只能识别「归一化后相同」的同义类名（见 R-14：不用编辑距离，避免错误合并）。
+ * 拼写差异、想统一命名、想把多类并成一类，都需要人工指定——这里就是那个入口。
+ * 左列选原类名、右列选目标（可在下拉里直接输入新名字），多行可指向同一目标。
+ */
+function CustomMappingEditor({
+  classes,
+  counts,
+  rules,
+  onChange,
+}: {
+  classes: string[]
+  counts: Record<string, number>
+  rules: CustomRule[]
+  onChange: (next: CustomRule[]) => void
+}) {
+  const options = classes.map((c) => ({
+    value: c,
+    label: `${c}（${counts[c] ?? 0}）`,
+  }))
+
+  const update = (index: number, patch: Partial<CustomRule>) => {
+    onChange(rules.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+  }
+
+  // 已与其他规则冲突的选择：同一原类名出现多次时会互相覆盖，提前标出来
+  const duplicated = new Set(
+    rules.map((r) => r.from).filter((f, i, arr) => f && arr.indexOf(f) !== i),
+  )
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>自定义映射</Text>
+        <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+          把任意类名改成另一个名字；多行指向同一目标即合并为一类。目标名可直接输入新名称。
+        </Text>
+      </div>
+
+      {rules.map((rule, index) => (
+        <Space key={index} align="start" style={{ display: 'flex', marginBottom: 8 }} wrap>
+          <Select
+            size="small"
+            style={{ width: 220 }}
+            placeholder="原类名"
+            showSearch
+            value={rule.from || undefined}
+            status={duplicated.has(rule.from) ? 'error' : undefined}
+            onChange={(v) => update(index, { from: v })}
+            options={options}
+            filterOption={(input, option) =>
+              String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+          />
+          <span style={{ lineHeight: '24px' }}>→</span>
+          <Select
+            size="small"
+            style={{ width: 220 }}
+            placeholder="合并到（可输入新名称）"
+            showSearch
+            value={rule.to || undefined}
+            onChange={(v) => update(index, { to: v })}
+            options={options}
+            filterOption={(input, option) =>
+              String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            // 允许输入类别清单之外的新名称
+            mode="tags"
+            maxCount={1}
+            onSelect={(v: string) => update(index, { to: (v as string).trim() })}
+          />
+          <Button
+            size="small"
+            type="text"
+            danger
+            onClick={() => onChange(rules.filter((_, i) => i !== index))}
+          >
+            删除
+          </Button>
+        </Space>
+      ))}
+
+      <Button
+        size="small"
+        onClick={() => onChange([...rules, { from: '', to: '' }])}
+        style={{ marginTop: rules.length ? 0 : 4 }}
+      >
+        添加映射
+      </Button>
+
+      {duplicated.size > 0 && (
+        <Alert
+          style={{ marginTop: 8 }}
+          type="warning"
+          showIcon
+          message={`同一原类名被映射了多次，只有最后一条生效：${[...duplicated].join('、')}`}
+        />
+      )}
+    </div>
+  )
+}
+
 /** 类别清单与同义类名合并建议。 */
 function TaxonomyPanel({
   suggest,
   choices,
   onChange,
+  customRules,
+  onCustomChange,
 }: {
   suggest: TaxonomySuggestResponse
   choices: Record<string, string>
   onChange: (next: Record<string, string>) => void
+  customRules: CustomRule[]
+  onCustomChange: (next: CustomRule[]) => void
 }) {
   const errors = suggest.name_issues.filter((i) => i.level === 'error')
   const warnings = suggest.name_issues.filter((i) => i.level === 'warning')
@@ -132,9 +246,16 @@ function TaxonomyPanel({
           type="success"
           showIcon
           message="未发现疑似同义类别"
-          description="合并建议基于「去掉标点与大小写后是否相同」，只处理写法差异，不猜测拼写错误——错误合并的代价远大于漏合并，拼写差异请人工指定映射。"
+          description="合并建议基于「去掉标点与大小写后是否相同」，只处理写法差异，不猜测拼写错误——错误合并的代价远大于漏合并，拼写差异请用下方的自定义映射人工指定。"
         />
       )}
+
+      <CustomMappingEditor
+        classes={suggest.classes}
+        counts={suggest.counts}
+        rules={customRules}
+        onChange={onCustomChange}
+      />
 
       {errors.length > 0 && (
         <Alert
@@ -382,6 +503,7 @@ export default function ExportStep({ sources, annotationKind, categories }: Prop
   const [rules, setRules] = useState<CleanRule[]>([])
   const [suggest, setSuggest] = useState<TaxonomySuggestResponse | null>(null)
   const [mergeChoices, setMergeChoices] = useState<Record<string, string>>({})
+  const [customRules, setCustomRules] = useState<CustomRule[]>([])
   const [taxReport, setTaxReport] = useState<TaxonomyReport | null>(null)
   const [busy, setBusy] = useState<'' | 'split' | 'export' | 'clean' | 'taxonomy'>('')
 
@@ -395,6 +517,7 @@ export default function ExportStep({ sources, annotationKind, categories }: Prop
   useEffect(() => {
     setSuggest(null)
     setTaxReport(null)
+    setCustomRules([])
     const first = sources[0]
     if (!first) return
     api
@@ -421,6 +544,12 @@ export default function ExportStep({ sources, annotationKind, categories }: Prop
       s.names.forEach((n) => {
         if (n !== target) mapping[n] = target
       })
+    })
+    // 自定义映射最后生效：用户显式指定的优先级高于系统建议
+    customRules.forEach((r) => {
+      const from = r.from.trim()
+      const to = r.to.trim()
+      if (from && to && from !== to) mapping[from] = to
     })
     return mapping
   }
@@ -723,7 +852,15 @@ export default function ExportStep({ sources, annotationKind, categories }: Prop
         </Form.Item>
       </Form>
 
-      {suggest && <TaxonomyPanel suggest={suggest} choices={mergeChoices} onChange={setMergeChoices} />}
+      {suggest && (
+        <TaxonomyPanel
+          suggest={suggest}
+          choices={mergeChoices}
+          onChange={setMergeChoices}
+          customRules={customRules}
+          onCustomChange={setCustomRules}
+        />
+      )}
       {taxReport && <TaxonomyResult report={taxReport} />}
       {cleanReport && <CleanReportCard report={cleanReport} rules={rules} />}
 

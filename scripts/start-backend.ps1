@@ -1,4 +1,4 @@
-# 启动后端（FastAPI，开发模式，热重载）
+﻿# 启动后端（FastAPI，开发模式，热重载）
 # 用法： powershell -ExecutionPolicy Bypass -File scripts\start-backend.ps1
 
 $ErrorActionPreference = "Stop"

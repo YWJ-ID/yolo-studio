@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { Layout, Menu, Spin, Typography, Tag } from 'antd'
+import { Layout, Menu, Spin, Typography } from 'antd'
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -65,7 +65,6 @@ export default function MainLayout() {
       <Layout>
         <Header className="app-header">
           <Typography.Text strong>YOLO 训练全流程可视化工作台</Typography.Text>
-          <Tag color="blue">骨架版 v0.1</Tag>
         </Header>
         <Content className="app-content">
           <Suspense fallback={<Spin style={{ display: 'block', marginTop: 80 }} />}>
