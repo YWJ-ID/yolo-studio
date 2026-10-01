@@ -26,7 +26,7 @@
 | M4 | 部署导出 | 3/3 | **已完成** |
 | M5 | 前端界面 | 11/11 | **已完成** |
 | M6 | 实时验证 | 8/8 | **已完成**（含前端页面，已真实浏览器验证） |
-| M7 | 预标注（模型批量标框） | 1/3 | **进行中**：core 已写并跑通验证，API/前端/CLI/测试未做 |
+| M7 | 预标注（模型批量标框） | 3/3 | **已完成**：core / API / 前端向导 / CLI / 测试 / 血缘 |
 
 **MVP 定义（一期目标）**：M0 全部 + M1 的 `M1-01/02/03/08/09/10` + M2 的 `M2-01/02/03/04` + M5 的 `M5-01/02/05`。
 
@@ -133,7 +133,7 @@
 
 ---
 
-## M7 预标注（待 M6 完成后定稿）
+## M7 预标注（伪标签）
 
 > **定位：预标注（pre-annotation），不是「自动标注」。**
 >
@@ -147,9 +147,19 @@
 
 | ID | 任务 | 状态 | 备注 |
 |---|---|---|---|
-| M7-01 | 批量推理 → 写入 IR（伪标注） | 未开始 | 复用 `core/infer/`；标注来源标记为模型预测，必须可追溯 |
-| M7-02 | 预标注 API + 前端向导 | 未开始 | 权重 + 图片目录 → 预览 → 确认 → 生成数据集 |
-| M7-03 | 血缘记录「伪标签」身份 | 未开始 | `dataset_card.json` 写明权重 / conf / 来源，界面给出复核提示 |
+| M7-01 | 批量推理 → 写入 IR（伪标注） | 已完成 | `core/prelabel/`：`build_bundle` / `annotate_bundle` / `run_prelabel`；复用 `core/infer` 常驻子进程；单张失败记入 `report.failures` 并跳过，不中断整批 |
+| M7-02 | 预标注 API + 前端向导 | 已完成 | `/api/prelabel/*`（formats/weights/jobs/samples/export）；后台线程跑推理（CPU 批量耗时长，不阻塞 HTTP），前端轮询 + 三步向导 `pages/PrelabelWizard.tsx` |
+| M7-03 | 血缘记录「伪标签」身份 | 已完成 | `dataset_card.json` 固定带 `prelabel` 段（权重/conf/iou/模型类别/生成时间 + 免责说明）；导出目录名强制 `prelabel` 前缀；页面与 CLI 均给出「必须人工复核」提示 |
+
+**M7 补充交付（与其它模块保持一致）**：
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| 测试 `backend/tests/test_prelabel.py` | 已完成 | 97 断言：list_images / build_bundle / annotate（正常·失败·崩溃·空目录·分类）/ 血缘 / 导出卡片 / API 路由与错误路径。**回归了历史统计 bug**（`boxes_total` 未累加） |
+| CLI 子命令 `prelabel` | 已完成 | `--weights/--images/--conf/--iou/--limit/--out`；`--out` 时顺手导出（目录名自动带前缀）；`--list-formats` 复用推理格式探测 |
+
+> **M7 的定位重申（R-37）**：产出的是**伪标签**，不是标注。漏检 = 缺标注、误检 = 错标注，
+> 必须人工复核后才能作为训练数据。血缘与界面文案都不得暗示可跳过复核。
 
 ---
 
@@ -201,6 +211,9 @@
 | R-42 | **stop() 可能返回中间态（训练/评估/导出共有的竞态）** | 已修复 | `test_eval` 偶发失败（约 1/6），暴露的是三个管理器共有的竞态：`_finalize` 要跑几秒（等进程 + 等日志刷完），若监控线程先进入且通过了 `finalized` 守卫，此时 `stop()` 里对 `_finalize` 的调用会**立即早返回**，于是拿回一个状态仍是 `stopping` 的任务。已加 `finalize_done` 事件：已有人在收尾时 `stop()` **等它真正跑完**再返回。三个管理器（train / eval / deploy）一并修，连跑 3 轮全量测试与 10 轮 `test_eval` 均无失败 |
 | R-43 | **摄像头模式看不到框（真 bug）** | 已修复 | 实时验证页在摄像头模式下把 `video` 显示、`canvas` 设为 `display:none`，但**框正是画在这个隐藏 canvas 上**，因此画面上永远看不到框（用户实测「举着手机也没框」才暴露）。已改为 canvas 绝对定位叠在视频上（`pointerEvents:none`），并处理 `object-fit:contain` 黑边造成的坐标偏移（画布尺寸与位置对齐视频实际渲染区）。另把抓帧改为独立离屏 canvas，不再与显示画布混用 |
 | R-44 | **类别清单只认英文逗号** | 已修复 | 前端原用 `split(',')`，用户打 `person;person1` 时**整串被当成一个类名**去覆盖某个下标（比报错更隐蔽）。已放宽为逗号 / 分号 / 竖线 / 顿号 / 换行等分隔符，并在界面写明「只改显示名字、不改变模型识别什么」及下标对应规则 |
+| R-45 | **预标注任务存在内存里** | 已决策 | M7 的预标注任务（含未导出的 IR）保存在后端进程内存中，服务重启即丢失。理由：预标注是「跑一次 → 复核 → 导出」的一次性流程，把整批 IR 落盘会与数据集存储重复；重启后重跑即可。界面上标注了「仅本次后端进程内」 |
+| R-46 | **预标注任务疑似串行推理**（自查） | 已更正 | 首版实现里 `_run_job` 逐张同步推理；实测 6 张 CPU 3.3s、5 张 ONNX 4.8s，批量几百张会较久。这是 CPU 推理的固有代价（与 M6 同源），不是缺陷。任务在后台线程跑、前端轮询，不阻塞 HTTP |
+| R-47 | **`test_train` 存在环境相关的偶发失败（既有，与 M7 无关）** | 已知悉 | 现象：`test_api_layer` 偶尔在 `wait_terminal` 上**超时 25s**（失败运行总耗时 ~52s vs 正常 ~28s，差 ≈ 超时时间），随后 3 条断言失败（指标 1/2 行、增量取指标为空、已结束任务 stop 未 409），**无异常栈**——说明监控线程在 25s 内含异常地「没有收尾」。实测频率：单跑 `test_train.py` 约 1/8~1/12，**全量套件连跑时约 1/3**；把同一场景写成独立循环跑 40 次、以及给 `_finalize` 加异常探针后连跑 15 次，均**不复现**，故强依赖测试文件上下文 / 机器负载，而非单段逻辑。涉事代码是 `core/train/manager.py`（**M7 完全未改动**）。两个怀疑点：①`_finalize` 先置 `rt.finalized=True` 再干活，若中途抛错则再次进入只会 `finalize_done.wait()` 而永不落终态（R-42 的 `finalize_done` 会让这种 wedge「静默等待」）；②监控线程被 OS/AV 抢占长时间未 tick。**同类偶发也见于 `test_eval`**（一次性连跑 5 个文件时出现 140/2，单独跑仍 147 全过），指向环境/负载而非某个模块。**当前结论：以单次全量运行为准，但该文件并非稳定全绿。** 根治方向：收尾体加 `try/finally` 兜底落终态 + 给监控循环加看门狗；测试侧延长超时并打印超时诊断 |
 
 ---
 
@@ -291,6 +304,12 @@
 | 2026-09-30 | 修复 R-40 / R-41（真实测试暴露） | ①ONNX 类名说法不准确（实测该 ONNX 自带 names，能直接读出）；②**显式类名没传到框上**——`predict_image` 重复读模型 names。已抽出共用 `resolve_names()`。修复后用真实 ONNX 复验：显式填中文类名后，**框上确实显示中文**而非 `Phone` |
 | 2026-09-30 | 全量测试（含修复） | **907 断言全部通过**（M6 97）；前端 `npm run build` 通过 |
 | 2026-09-30 | 修复 **R-42**：`stop()` 可能返回中间态。`test_eval` 偶发失败（约 1/6）暴露了 train/eval/deploy 三个管理器共有的竞态——监控线程与 `stop()` 同时进 `_finalize` 时，后者会早返回而拿到仍为 `stopping` 的任务。加 `finalize_done` 事件，让 `stop()` 等收尾真正跑完。**连跑 3 轮全量测试 + 10 轮 `test_eval`，零失败**（修复前约 1/6 失败） |
+| 2026-09-30 | 新增 M7 测试 `backend/tests/test_prelabel.py` | **全部通过（97 断言）**；覆盖 list_images（递归/单文件/缺目录）、build_bundle（图像数/uid/尺寸/相对路径）、annotate_bundle（正常/`boxes_total` 累加/逐类计数/meta 血缘）、单个图业务失败与子进程崩溃均记入 failures 且不中断整批、空目录、分类分支（kind=image、bbox=None）、血缘写入、导出卡片、API 路由与错误路径。用假 worker 脚本（不依赖 torch），崩溃用例走真实常驻子进程 |
+| 2026-09-30 | **修复预标注历史统计 bug 的回归** | `boxes_total` 未累加曾导致「报告显示 0 框、实际 21 个」。本轮补测试时同时修正 `annotate_bundle`：**worker 回 `ok=false`（业务错误）不再当成「空标注」**，改记入 `report.failures`，避免把失败混进空图（与 R-37「漏检不可掩盖」同理） |
+| 2026-09-30 | **真实 API 联调（M7-02，TestClient + 真实权重）** | 用 `smoke_e3/weights/best.pt`（2 类）对 `tiny_det/images`（14 图）中 6 张预标注：任务 `finished`，进度 6/6，`images_total=6 / 失败 0 / 类别 ['square','circle']`（mAP=0 的冒烟模型，0 框属正常）；samples 返回 6 张预览；导出 200，目录名 `prelabel_verify_api`（前缀生效），`dataset_card.json` 的 `prelabel` 段含权重/conf/classes/disclaimer |
+| 2026-09-30 | **真实 CLI 联调（M7 CLI + 真实 ONNX，证明有框）** | `cli.main prelabel` 用 DMS ONNX（5 类，`best_raw.onnx`）对 5 张图：**15 个框**（Phone 12 / Cigarette 3），导出 train3/val1/test1、`boxes_exported=15`；**磁盘上 labels 逐文件 6+1+4+3+1=15 行**，与报告一致；`dataset_card.json` 的 `prelabel` 段完整（权重/conf/iou/classes/disclaimer） |
+| 2026-09-30 | 前端 `npm run build`（M7 向导页） | 通过；新增 `pages/PrelabelWizard.tsx`（三步向导，chunk 38.0 kB）、`/prelabel` 路由与「预标注」菜单 |
+| 2026-09-30 | M7 API 错误路径 | 不存在的任务 404、图片目录不存在 404、权重不存在 404（启动前拒绝，不跑空任务） |
 
 ---
 
@@ -365,3 +384,10 @@
 | 2026-09-30 | `InferSession.snapshot()` 补 `class_source`（request / model），前端显示类名来源，避免「不知道类名是哪来的」 |
 | 2026-09-30 | 修复 **R-42**：训练/评估/导出三个管理器共有的 `stop()` 竞态（返回中间态）。由 `test_eval` 偶发失败暴露 |
 | 2026-09-30 | 修复 **R-43 / R-44**（前端，均由用户实测暴露）：①摄像头模式把框画在隐藏的 canvas 上，导致永远看不到框；②类别清单只认英文逗号，用户用分号时整串被当成一个类名。已改为叠加显示 + 多分隔符 + 对齐 contain 黑边 |
+| 2026-09-30 | 完成 **M7-01 批量推理 → IR（伪标注）**：`core/prelabel/` 新增 `run_prelabel` / `attach_lineage` / `ensure_prelabel_prefix` / `export_name`；`annotate_bundle` 修正业务错误被当成空标注的问题 |
+| 2026-09-30 | 完成 **M7-03 血缘**：`core/export` 的 `dataset_card.json` 固定写入 `prelabel` 段（权重 / conf / iou / 模型类别 / 生成时间 + 免责说明）；导出目录名经 `ensure_prelabel_prefix` 强制带 `prelabel` 前缀 |
+| 2026-09-30 | 完成 **M7-02 API**：新增 `app/services_prelabel.py`（后台线程任务 + 独立推理会话 + 复用 taxonomy/clean/split/export）与 `app/api/routes/prelabel.py`（formats/weights/jobs/samples/export/delete）；新增 `PrelabelJob` 等 schema |
+| 2026-09-30 | 完成 **M7 前端向导**：`pages/PrelabelWizard.tsx`（权重+目录 → 预览复核 → 生成数据集）+ `/prelabel` 路由与菜单；`api/client.ts`、`types.ts` 补齐 M7 接口与类型。页面与首页注明「伪标签必须人工复核」 |
+| 2026-09-30 | 完成 **M7 CLI**：`cli.main prelabel`（`--list-formats` / `--limit` / `--out` 顺手导出 / `--json`），与 `infer` / `export-model` 风格一致 |
+| 2026-09-30 | **M7 预标注 3/3 全部完成**；新增测试 97 断言。全量应为 **1004 断言**（11 个测试文件）；实测 10 个文件（含 `test_prelabel` 97）**稳定全绿**，唯一不稳的是 `test_train` 的既有偶发（R-47，M7 未改动其代码） |
+| 2026-09-30 | 复核基线：`test_train.py` 单跑 8 次中 1 次、12 次中 1 次失败；全量套件连跑时约 1/3 失败（均同 3 条断言、耗时 +≈25s，见 R-47）。其余 10 个测试文件连同 `test_prelabel` **零失败**。**更正**：此前「907 全绿」只代表单次运行，`test_train` 本身存在环境相关偶发 |

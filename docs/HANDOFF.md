@@ -15,15 +15,16 @@
 | M3 评估与模型库 | 4/4 | 完成 |
 | **M4 部署导出** | **3/3** | **完成** |
 | M5 前端界面 | **11/11** | **完成**（含 M5-09 路由级分割、M5-10 ECharts 按需引入、M5-11 设置页） |
+| M6 实时验证 | **8/8** | **完成**（含前端页面，已真实浏览器验证） |
+| M7 预标注 | **3/3** | **完成**（core / API / 前端向导 / CLI / 测试 / 血缘） |
 
-**测试现状：907 断言全部通过**（10 个测试文件，见第四节）。
+**测试现状：1004 断言**（11 个测试文件，见第四节）。其余 10 个文件（含 `test_prelabel` 97）**稳定全绿**；
+`test_train.py` 存在一个**环境相关的偶发失败**（单跑约 1/8~1/12，全量连跑约 1/3，**与 M7 无关**，见 R-47）——
+它会让「全量一次跑绿」变成概率事件，别据此怀疑自己刚改的东西。
 
-**下一步任务**：M0~M5 全部完成，MVP 闭环（数据 → 训练 → 评估 → 模型库 → 导出）。
-**M6 实时验证 8/8 已完成**（含前端页面，已在真实浏览器里验证摄像头与叠加）。
-M7 预标注（模型批量标框）设计已定稿但未开工，见 `PROGRESS.md` 的 M7 章节。
-M6 的可选后续：视频模式的逐帧送检（当前有意未做，页面上如实说明）。
-可选优化见 `PROGRESS.md` 风险表，例如 R-32（antd / echarts 的 vendor chunk 仍偏大）
-与 R-33（M5 页面建议在有浏览器的环境再复核一次交互）。
+**下一步任务**：M0~M7 全部完成，完整闭环（数据 → 训练 → 评估 → 模型库 → 导出 → 实时验证 → 预标注）。
+后续可选：M6 视频模式逐帧送检（当前有意未做）；在有浏览器的环境复核 M5/M7 页面交互（R-33）；
+继续压缩 vendor chunk（R-32）；需要时安装 openvino 等可选依赖解锁更多格式。
 
 > M2 + M3 + M4 + M5 已可用：训练 → 自动评估 → 模型注册 → 多模型对比 → 导出部署（含产物校验），
 > 且全部有可视化界面：训练列表/新建、训练详情（实时曲线 + 资源 + 日志）、模型库/对比/导出、数据浏览器。
@@ -125,6 +126,8 @@ frontend/src/
 ├── pages/ModelLibrary.tsx      M5-08 模型库列表（多选对比）
 ├── pages/ModelDetail.tsx       M5-08 模型详情（概览 / 评估 / 导出部署）
 ├── pages/ModelCompare.tsx      M5-08 模型对比
+├── pages/VerifyCenter.tsx      M6 实时验证（摄像头 / 图片 / 视频切换 + 叠加）
+├── pages/PrelabelWizard.tsx    M7 预标注向导（权重 + 图片 → 预览复核 → 生成数据集）
 ├── pages/Settings.tsx          M5-11 设置（只读配置与环境，数据来自 /api/system/config）
 └── components/                 SampleGrid / ExportStep / StatusTag / MetricsChart /
                                 ResourcePanel / LogViewer / ArtifactGallery / EvalResultView
@@ -163,6 +166,7 @@ cd backend
 .\.venv\Scripts\python.exe tests\test_eval.py        # 147 评估与模型库（结果归一化/报告/注册/对比/API）
 .\.venv\Scripts\python.exe tests\test_deploy.py      # 103 部署导出（格式探测/哈希校验/生命周期/API/联动）
 .\.venv\Scripts\python.exe tests\test_infer.py       # 97  M6 实时验证（格式/归一化/会话/协议/API/背压/类名来源）
+.\.venv\Scripts\python.exe tests\test_prelabel.py    # 97  M7 预标注（收集/IR/统计/失败跳过/分类/血缘/导出卡片/API）
 ```
 
 > Windows 控制台是 GBK，含 `²` 等字符的输出会抛 `UnicodeEncodeError`。
@@ -238,14 +242,13 @@ cd backend
 - PROGRESS.md（进度、已决策事项、风险项）
 - README.md（架构与设计决策）
 
-M0~M6 已完成：M1 数据模块（12/12）、M2 训练（7/7）、M3 评估与模型库（4/4）、
-M4 部署导出（3/3）、M5 前端界面（11/11）、M6 实时验证（8/8，含前端页面，已真实浏览器验证）。
-测试 907 断言通过，前端 `npm run build` 通过。
+M0~M7 已完成：M1 数据模块（12/12）、M2 训练（7/7）、M3 评估与模型库（4/4）、
+M4 部署导出（3/3）、M5 前端界面（11/11）、M6 实时验证（8/8）、M7 预标注（3/3）。
+测试 1004 断言（11 个文件；`test_train` 有环境相关偶发，见 R-47），前端 `npm run build` 通过。
 
 后续可做的事（按需选择，先读 PROGRESS.md 风险表）：
-- 开工 M7 预标注（模型批量标框 → IR → 导出）；设计已定稿，见 PROGRESS.md M7 章节与 R-37；
 - M6 视频模式的逐帧送检（当前有意未做）；
-- 在有浏览器的环境复核 M5 页面交互（R-33）；
+- 在有浏览器的环境复核 M5 / M7 页面交互（R-33）；
 - 用 manualChunks / echarts 按需引入继续压缩 vendor chunk（R-32）；
 - 需要时安装 openvino 等可选依赖，解锁更多导出/推理格式。
   （onnx / onnxslim / onnxruntime 已装，ONNX 导出与推理均已真实跑通。）
@@ -253,7 +256,7 @@ M4 部署导出（3/3）、M5 前端界面（11/11）、M6 实时验证（8/8，
 动手前先跑一遍测试确认基线，每完成一个任务更新 PROGRESS.md（含验证记录与变更记录）。
 
 注意：本机无 CUDA（CPU 训练），可视化需支持无 GPU 降级。
-训练/评估/导出相关坑见 HANDOFF.md 第七、八、九节；M6 坑见第十节；前端坑见「前端现状」小节。
+训练/评估/导出相关坑见 HANDOFF.md 第七、八、九节；M6 坑见第十节；M7 坑见第十一节；前端坑见「前端现状」小节。
 ```
 
 ---
@@ -440,3 +443,34 @@ cli 的 infer 子命令        命令行推理（--list-formats / 多图 / --jso
 6. **M6 不落盘、不产数据集**。它是「显示」，伪标注是 M7 的事（见 R-37，必须人工复核）。
 7. **前端页面已完成并真实浏览器验证**（摄像头出画面、叠加生效）。**视频模式的逐帧送检未实现**——
    页面上如实写了，不要留「点了没反应的假按钮」。
+
+---
+
+## 十一、M7 预标注的文件地图与坑
+
+定位见 `PROGRESS.md` 的 M7 章节与 **R-37**：产出的是**伪标签**，不是标注，必须人工复核。
+
+```
+core/prelabel/
+├── prelabel.py            list_images / build_bundle / annotate_bundle / run_prelabel
+│                          + attach_lineage / ensure_prelabel_prefix / export_name
+app/services_prelabel.py   PrelabelJob 后台线程任务（独立 InferSession）+ export_job 复用现成流水线
+app/api/routes/prelabel.py /api/prelabel/*（formats/weights/jobs/samples/export/delete）
+app/schemas.py             PrelabelRequest / PrelabelJobResponse / PrelabelExportRequest ...
+frontend/src/pages/PrelabelWizard.tsx   三步向导（配置 → 预览 → 生成数据集）
+tests/test_prelabel.py     97 断言（假 worker 脚本，不依赖 torch）
+cli/main.py 的 prelabel    命令行预标注（--out 时顺手导出）
+```
+
+### M7 的关键约定
+
+1. **只做「推理结果 → IR」**。`core/prelabel` 只把 `FrameResult` 写进 `DatasetBundle`；
+   类别规范化 / 清洗 / 划分 / 导出一律调用现成的（`services_prelabel.export_job`），不要重写。
+2. **推理复用 `core/infer`**，但预标注任务用**自己的** `InferSession`（与 M6 实时验证的会话分开），
+   避免把实时验证正在用的模型换掉。任务跑在后台线程，前端轮询，不阻塞 HTTP。
+3. **单张失败不中断整批**：`InferError`（崩溃/超时）与 worker 业务错误（`ok=false`，如图像损坏）
+   都记入 `report.failures` 并跳过。**不要把业务错误当成「这张图没有目标」**——那会把失败藏进空标注。
+4. **`boxes_total` 必须累计**（曾因未累加而报告 0 框、实际 21 个）。分类任务按整图标注计数。
+5. **血缘固定落在 `dataset_card.json` 的 `prelabel` 段**（权重 / conf / iou / 模型类别 / 生成时间 + 免责说明），
+   非预标注数据集该键为 `null`。导出目录名强制 `prelabel` 前缀。
+6. **任务存在内存里**（R-45）：服务重启即丢，重跑即可；界面已注明「仅本次后端进程内」。

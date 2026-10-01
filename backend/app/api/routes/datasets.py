@@ -520,6 +520,7 @@ def list_versions() -> list[DatasetVersion]:
                 classes=card.get("classes", []),
                 images=card.get("images_exported", {}),
                 sources=card.get("sources", []),
+                prelabel=bool(card.get("prelabel")),
             )
         )
     return sorted(versions, key=lambda v: v.created_at, reverse=True)

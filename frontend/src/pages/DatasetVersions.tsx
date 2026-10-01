@@ -69,7 +69,14 @@ export default function DatasetVersions() {
                 dataIndex: 'name',
                 render: (v, r) => (
                   <Space direction="vertical" size={0}>
-                    <Text strong>{v}</Text>
+                    <Space size={4}>
+                      <Text strong>{v}</Text>
+                      {r.prelabel && (
+                        <Tag color="orange" title="由模型预测生成，必须人工复核后才能作为训练数据">
+                          伪标签
+                        </Tag>
+                      )}
+                    </Space>
                     <Text type="secondary" style={{ fontSize: 12 }}>
                       {r.path}
                     </Text>
@@ -157,6 +164,19 @@ function LineageDetail({ card }: { card: Record<string, any> }) {
           </div>
         ))}
       </Descriptions.Item>
+      {card.prelabel && (
+        <Descriptions.Item label="预标注血缘">
+          <div>
+            <Tag color="orange">伪标签</Tag>
+            权重 <Text className="mono">{card.prelabel.weights}</Text>
+            ，conf {card.prelabel.conf}，iou {card.prelabel.iou}
+            {Array.isArray(card.prelabel.classes) && card.prelabel.classes.length > 0 && (
+              <>，模型类别 {(card.prelabel.classes as string[]).join('、')}</>
+            )}
+          </div>
+          <Text type="danger">{card.prelabel.disclaimer}</Text>
+        </Descriptions.Item>
+      )}
       <Descriptions.Item label="划分参数">
         {split.warnings ? (
           <div>

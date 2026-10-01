@@ -11,6 +11,7 @@ import {
   CloudUploadOutlined,
   PictureOutlined,
   HistoryOutlined,
+  TagsOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
@@ -32,6 +33,7 @@ const MENU_ITEMS = [
   { key: '/train', icon: <ExperimentOutlined />, label: '训练' },
   { key: '/models', icon: <DeploymentUnitOutlined />, label: '模型库' },
   { key: '/verify', icon: <EyeOutlined />, label: '实时验证' },
+  { key: '/prelabel', icon: <TagsOutlined />, label: '预标注' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ]
 
@@ -40,6 +42,7 @@ function selectedMenuKey(pathname: string): string {
   if (pathname.startsWith('/train')) return '/train'
   if (pathname.startsWith('/models')) return '/models'
   if (pathname.startsWith('/verify')) return '/verify'
+  if (pathname.startsWith('/prelabel')) return '/prelabel'
   if (pathname.startsWith('/data/')) return pathname
   return pathname
 }

@@ -50,7 +50,9 @@ yolo-studio/
 │   │   ├── registry/        # 模型库（数据集血缘由 dataset_card.json 承载）
 │   │   ├── train/           # 训练调度与指标解析
 │   │   ├── eval/            # 评估调度、结果归一化、报告、多模型对比
-│   │   └── deploy/          # 导出（格式探测 / 产物管理与校验）
+│   │   ├── deploy/          # 导出（格式探测 / 产物管理与校验）
+│   │   ├── infer/           # 常驻推理子进程（实时验证与预标注共用）
+│   │   └── prelabel/        # 预标注：批量推理结果 → 统一 IR（伪标签）
 │   ├── app/                 # FastAPI 层
 │   ├── cli/                 # 命令行入口
 │   ├── tests/               # 测试与夹具
@@ -336,6 +338,48 @@ verify：重新计算大小与 sha256，与导出时的基线比对
 | WS | `/api/infer/ws` | 实时流（含背压丢帧） |
 
 > 前端验证页（M6-06）已实现并通过真实浏览器验证；视频模式的逐帧送检**有意留到后续**（页面上如实说明）。
+
+---
+
+## 预标注（M7）
+
+```
+已训练权重 + 待标注图片目录
+      │  PrelabelConfig：权重 / 类别 / conf / iou / imgsz
+      ▼
+批量推理（复用 M6 的常驻推理子进程，一次一张）
+      ▼
+统一 IR（每条标注 meta 记 source=model_prediction + 权重 + conf，score 保留置信度）
+      │  taxonomy / clean / split / export  全部复用现成的
+      ▼
+dataset_card.json 的 prelabel 段（权重 / conf / iou / 模型类别 / 生成时间 + 免责说明）
+导出目录名带 prelabel 前缀
+```
+
+要点：
+
+- **产出的是伪标签，不是标注**（R-37）。模型漏检 = 这批数据少了标注，模型误检 = 把错误固化成标注。
+  结果**必须经人工复核后**才能作为训练数据；血缘与界面文案都不暗示可跳过复核。
+- **只做「推理结果 → IR」**：`core/prelabel` 不重写清洗 / 类别 / 划分 / 导出，全部调用现成模块。
+- **批量耗时，后台任务**：推理跑在独立的后台线程与独立会话里，不阻塞 HTTP；前端轮询进度。
+  任务存在内存中（R-45），服务重启后重跑即可。
+- **单张失败不拖累整批**：崩溃 / 超时 / 图像损坏都记入 `report.failures` 并跳过，
+  且**不会被当成「这张图没有目标」**混进空标注。
+- **可追溯**：导出后 `dataset_card.json` 固定带 `prelabel` 段，模型可反查「我是在哪个权重、什么阈值下标的」。
+
+预标注接口（`app/api/routes/prelabel.py`）：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/prelabel/formats` / `/weights` | 可推理格式与可选权重（与 M6 共用能力探测） |
+| POST | `/api/prelabel/jobs` | 启动一次预标注（后台任务，立即返回） |
+| GET | `/api/prelabel/jobs` / `/{id}` | 任务列表 / 详情（状态 + 进度 + 报告） |
+| GET | `/api/prelabel/jobs/{id}/samples` | 带预测框的预览样本 |
+| POST | `/api/prelabel/jobs/{id}/export` | 生成数据集（类别/清洗/划分/导出） |
+| DELETE | `/api/prelabel/jobs/{id}` | 删除任务（只清内存） |
+
+> 前端向导 `pages/PrelabelWizard.tsx`（步骤 1 选权重与图片 → 步骤 2 预览复核 → 步骤 3 生成数据集）；
+> CLI：`cli.main prelabel --weights ... --images ... [--out ...]`。
 
 ---
 

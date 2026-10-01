@@ -505,6 +505,9 @@ def _write_dataset_card(
         "sources": [
             {"source_id": bundle.source_id, "format": bundle.format_name, "root": bundle.root}
         ],
+        # 预标注血缘：键固定存在，非预标注数据集为 null。
+        # 有值时说明这些「标注」其实是模型预测（伪标签），必须人工复核后才能当训练数据。
+        "prelabel": bundle.meta.get("prelabel"),
         "images_exported": report.images_exported,
         "boxes_exported": report.boxes_exported,
         "images_skipped": report.images_skipped,

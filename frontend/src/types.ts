@@ -95,6 +95,8 @@ export interface DatasetVersion {
   classes: string[]
   images: Record<string, number>
   sources: { source_id: string; format: string; root: string }[]
+  /** 是否由预标注（伪标签）生成，需人工复核 */
+  prelabel?: boolean
 }
 
 export interface CleanFinding {
@@ -722,3 +724,60 @@ export interface BrowseResponse {
   sources: BrowseSource[]
   images: BrowseImage[]
 }
+
+/* ======================= 预标注（M7）======================== */
+
+export interface PrelabelFailure {
+  path: string
+  error: string
+}
+
+export interface PrelabelReportData {
+  ok: boolean
+  error: string
+  weights: string
+  conf: number
+  iou: number
+  imgsz: number
+  device: string
+  task: string
+  created_at: string
+  classes: string[]
+  /** 固定为 model_prediction，表示这些标注来自模型预测 */
+  source: string
+  images_total: number
+  images_with_boxes: number
+  images_empty: number
+  images_failed: number
+  boxes_total: number
+  count_by_category: Record<string, number>
+  failures: PrelabelFailure[]
+  duration_sec: number
+  /** 免责说明：伪标签必须人工复核 */
+  disclaimer: string
+}
+
+export interface PrelabelJob {
+  id: string
+  status: 'pending' | 'running' | 'finished' | 'failed'
+  images_dir: string
+  weights: string
+  conf: number
+  iou: number
+  imgsz: number
+  device: string
+  task: string
+  classes: string[]
+  max_det: number
+  source_id: string
+  limit: number
+  created_at: string
+  updated_at: string
+  error: string
+  progress: { done: number; total: number; current: string }
+  report: PrelabelReportData | null
+  export: { out_dir: string; report: ExportReport } | null
+  /** 是否已完成、可以进入「生成数据集」这一步 */
+  ready: boolean
+}
+

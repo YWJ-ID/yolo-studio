@@ -18,6 +18,7 @@ import type {
   ExportReport,
   HealthResponse,
   InferFormatsResponse,
+  InferFormatInfo,
   InferFrameResult,
   InferSessionState,
   InferWeightItem,
@@ -25,7 +26,9 @@ import type {
   MetricsSeries,
   ModelCard,
   ModelSummary,
+  PrelabelJob,
   ResourceSample,
+  SampleImage,
   ScanResponse,
   SplitReport,
   SystemConfig,
@@ -293,6 +296,53 @@ export const api = {
   }) =>
     http
       .post<{ ok: boolean; result: InferFrameResult }>('/api/infer/image', payload)
+      .then((r) => r.data),
+
+  // ---------- 预标注（M7） ----------
+  prelabelFormats: () =>
+    http.get<{ ok: boolean; formats: InferFormatInfo[] }>('/api/prelabel/formats').then((r) => r.data),
+
+  prelabelWeights: () =>
+    http.get<{ weights: InferWeightItem[] }>('/api/prelabel/weights').then((r) => r.data),
+
+  startPrelabel: (payload: {
+    weights: string
+    images_dir: string
+    classes?: string[]
+    task?: string
+    device?: string
+    imgsz?: number
+    conf?: number
+    iou?: number
+    max_det?: number
+    fmt?: string
+    source_id?: string
+    limit?: number
+  }) => http.post<{ ok: boolean; job: PrelabelJob }>('/api/prelabel/jobs', payload).then((r) => r.data),
+
+  prelabelJobs: () =>
+    http.get<{ ok: boolean; jobs: PrelabelJob[] }>('/api/prelabel/jobs').then((r) => r.data),
+
+  prelabelJob: (id: string) =>
+    http.get<{ ok: boolean; job: PrelabelJob }>(`/api/prelabel/jobs/${encodeURIComponent(id)}`).then((r) => r.data),
+
+  deletePrelabel: (id: string) =>
+    http.delete<{ ok: boolean; removed: string }>(`/api/prelabel/jobs/${encodeURIComponent(id)}`).then((r) => r.data),
+
+  prelabelSamples: (id: string, offset = 0, limit = 12) =>
+    http
+      .get<{ ok: boolean; total: number; categories: string[]; images: SampleImage[] }>(
+        `/api/prelabel/jobs/${encodeURIComponent(id)}/samples`,
+        { params: { offset, limit } },
+      )
+      .then((r) => r.data),
+
+  exportPrelabel: (id: string, payload: unknown) =>
+    http
+      .post<{ ok: boolean; out_dir: string; report: ExportReport; job: PrelabelJob }>(
+        `/api/prelabel/jobs/${encodeURIComponent(id)}/export`,
+        payload,
+      )
       .then((r) => r.data),
 }
 

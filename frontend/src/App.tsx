@@ -16,6 +16,7 @@ const ModelLibrary = lazy(() => import('./pages/ModelLibrary'))
 const ModelCompare = lazy(() => import('./pages/ModelCompare'))
 const ModelDetail = lazy(() => import('./pages/ModelDetail'))
 const VerifyCenter = lazy(() => import('./pages/VerifyCenter'))
+const PrelabelWizard = lazy(() => import('./pages/PrelabelWizard'))
 const Settings = lazy(() => import('./pages/Settings'))
 
 export default function App() {
@@ -38,6 +39,8 @@ export default function App() {
         <Route path="/models/:modelId" element={<ModelDetail />} />
 
         <Route path="/verify" element={<VerifyCenter />} />
+
+        <Route path="/prelabel" element={<PrelabelWizard />} />
 
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

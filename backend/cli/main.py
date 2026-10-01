@@ -798,6 +798,138 @@ def _save_annotated(out_dir: str, payloads: List[dict]) -> None:
         print(f"  已保存: {dst}")
 
 
+def _cmd_prelabel(args) -> int:
+    """用权重给一个图片目录批量打框，产出**伪标签**（M7，core 层独立可用）。
+
+    产出的是模型预测，不是标注：漏检 = 缺标注、误检 = 错标注，
+    **必须人工复核后**才能作为训练数据。给出 --out 时顺手导出为数据集。
+    """
+    from core.infer import capability_report, detect_weights_format
+    from core.export import ExportConfig, ExportError, export_yolo
+    from core.prelabel import (
+        PrelabelConfig,
+        ensure_prelabel_prefix,
+        run_prelabel,
+    )
+    from core.split import SplitConfig, assign_splits
+
+    if args.list_formats:
+        for item in capability_report():
+            mark = "可用" if item["available"] else f"不可用：{item['reason']}"
+            print(f"  {item['name']:<12} {item['label']:<22} {mark}")
+        return 0
+
+    if not args.weights:
+        print("请指定 --weights（或使用 --list-formats）", file=sys.stderr)
+        return 1
+    if not args.images:
+        print("请指定待标注的图片目录 --images", file=sys.stderr)
+        return 1
+
+    if not Path(args.images).exists():
+        print(f"图片目录不存在: {args.images}", file=sys.stderr)
+        return 1
+
+    device = resolve_device(args.device or os.environ.get("YOLO_STUDIO_DEVICE", "auto"))
+    classes = [c.strip() for c in str(args.classes).split(",") if c.strip()]
+    try:
+        fmt = detect_weights_format(args.weights)
+    except ValueError as exc:
+        print(f"权重格式无法识别: {exc}", file=sys.stderr)
+        return 1
+
+    config = PrelabelConfig(
+        weights=args.weights,
+        classes=classes,
+        device=device,
+        imgsz=args.imgsz,
+        task=args.task,
+        conf=args.conf,
+        iou=args.iou,
+        max_det=args.max_det,
+        fmt=fmt,
+    )
+
+    print("提示：模型给的是**伪标签**，漏检会变成「没有这个标注」，误检会被固化成标注。")
+    print("      这批结果必须经人工复核后才能作为训练数据。")
+    print("")
+
+    def on_progress(done: int, total: int, current: str) -> None:
+        if done == total or done % 10 == 0:
+            print(f"  [{done}/{total}] {current}")
+
+    bundle, report = run_prelabel(
+        args.images, config, limit=args.limit, on_progress=on_progress
+    )
+
+    if args.json:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(f"权重      : {report.weights}")
+        print(f"任务      : {report.task}   设备: {report.device}   conf: {report.conf}")
+        print(f"类别({len(report.classes)})  : {', '.join(report.classes) or '(无)'}")
+        print(f"图像      : {report.images_total}"
+              f"  (有标注 {report.images_with_boxes} / 空 {report.images_empty}"
+              f" / 失败 {report.images_failed})")
+        print(f"标注      : {report.boxes_total}")
+        if report.count_by_category:
+            print("逐类实例  :")
+            for name, count in sorted(report.count_by_category.items(), key=lambda x: -x[1]):
+                print(f"  {name:<24} {count}")
+        if report.failures:
+            print(f"失败明细  : {len(report.failures)} 张（前 5）")
+            for item in report.failures[:5]:
+                print(f"  - {item['path']}: {item['error']}")
+        print(f"耗时      : {report.duration_sec:.1f}s")
+
+    if not report.ok:
+        print(f"错误      : {report.error}", file=sys.stderr)
+        return 1
+
+    if not args.out:
+        return 0
+
+    # 导出：目录名强制带 prelabel 前缀，其余全部复用现成流水线
+    out = Path(args.out).expanduser()
+    out = out.parent / ensure_prelabel_prefix(out.name)
+    out = out.resolve()
+
+    split_report = None
+    if not args.no_split:
+        ratios = tuple(float(x) for x in str(args.split_ratio).split(","))
+        if len(ratios) != 3:
+            print("--split-ratio 必须是 3 个数，如 0.8,0.1,0.1", file=sys.stderr)
+            return 1
+        split_report = assign_splits(
+            bundle,
+            SplitConfig(
+                ratios=ratios,  # type: ignore[arg-type]
+                seed=args.seed,
+                strategy="random" if args.no_stratify else "stratified",
+                respect_groups=not args.no_groups,
+                respect_existing=not args.no_respect_split,
+            ),
+        ).to_dict()
+
+    try:
+        result = export_yolo(bundle, out, ExportConfig(overwrite=args.overwrite), split_report=split_report)
+    except ExportError as exc:
+        print(f"导出失败: {exc}", file=sys.stderr)
+        return 1
+
+    print("")
+    print(f"导出目录  : {result.out_dir}")
+    print(f"任务类型  : {result.task}")
+    print(f"类别      : {', '.join(result.classes)}")
+    for split, count in result.images_exported.items():
+        print(f"  {split:<8}: {count}")
+    print(f"检测框    : {result.boxes_exported}")
+    print(f"data.yaml : {result.data_yaml}")
+    print(f"血缘      : {result.dataset_card}（含 prelabel 段）")
+    print("提醒      : 导出的是伪标签数据集，训练前请人工复核。")
+    return 0
+
+
 def _cmd_export_model(args) -> int:
     """把权重导出为部署格式（core 层独立可用，不经 FastAPI）。"""
     from core.deploy import DeployManager, DeploySpec, capability_report, is_active as deploy_active
@@ -1095,6 +1227,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list-formats", action="store_true", help="只列出可推理格式与本机可用性")
     p.add_argument("--json", action="store_true", help="以 JSON 输出完整结果")
     p.set_defaults(func=_cmd_infer)
+
+    p = sub.add_parser("prelabel", help="用权重批量预标注图片目录，产出伪标签（可用 --out 直接导出数据集）")
+    p.add_argument("--weights", default="", help="权重文件路径（.pt / .onnx / ...）")
+    p.add_argument("--images", default="", help="待标注图片目录（会递归收集）")
+    p.add_argument("--classes", default="", help="逗号分隔的类名；ONNX 等不带类名的格式必须给")
+    p.add_argument("--task", default="detect", choices=["detect", "classify", "segment"])
+    p.add_argument("--imgsz", type=int, default=640)
+    p.add_argument("--device", default="", help="cpu | cuda:0；默认读 YOLO_STUDIO_DEVICE")
+    p.add_argument("--conf", type=float, default=0.25, help="置信度阈值")
+    p.add_argument("--iou", type=float, default=0.7, help="NMS IoU 阈值")
+    p.add_argument("--max-det", type=int, default=300, help="每张图最多保留多少个框")
+    p.add_argument("--limit", type=int, default=0, help=">0 时只处理前 N 张（预览用）")
+    p.add_argument("--out", default="", help="导出目录（目录名会自动带 prelabel 前缀）")
+    p.add_argument("--split-ratio", default="0.8,0.1,0.1", help="导出时的 train,val,test 比例")
+    p.add_argument("--seed", type=int, default=42, help="划分随机种子")
+    p.add_argument("--no-stratify", action="store_true", help="关闭分层划分")
+    p.add_argument("--no-groups", action="store_true", help="不按 group 分组（视频数据有泄漏风险）")
+    p.add_argument("--no-respect-split", action="store_true", help="忽略输入里已有的划分")
+    p.add_argument("--no-split", action="store_true", help="导出时不重新划分")
+    p.add_argument("--overwrite", action="store_true", help="允许覆盖非空导出目录")
+    p.add_argument("--list-formats", action="store_true", help="只列出可推理格式与本机可用性")
+    p.add_argument("--json", action="store_true", help="以 JSON 输出预标注报告")
+    p.set_defaults(func=_cmd_prelabel)
 
     return parser
 

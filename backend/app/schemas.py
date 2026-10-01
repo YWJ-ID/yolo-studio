@@ -236,6 +236,7 @@ class DatasetVersion(BaseModel):
     classes: List[str]
     images: Dict[str, int] = Field(default_factory=dict)
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+    prelabel: bool = Field(False, description="是否由预标注（伪标签）生成，需人工复核")
 
 
 # ---------------------------------------------------------------------------
@@ -593,3 +594,65 @@ class EnvResponse(BaseModel):
     cuda_device_count: int = 0
     devices: List[str] = Field(default_factory=list)
     train_device: str = "cpu"
+
+
+# ---------------------------------------------------------------------------
+# M7 预标注（伪标签）
+# ---------------------------------------------------------------------------
+
+
+class PrelabelRequest(BaseModel):
+    """启动一次预标注：用权重给一个目录的图片批量打框。"""
+
+    weights: str = Field(..., description="权重路径（.pt / .onnx / ...）")
+    images_dir: str = Field(..., description="待标注图片目录（会递归收集）")
+    classes: List[str] = Field(default_factory=list, description="显式类名；空则由模型决定")
+    task: str = Field("detect", description="detect | classify | segment")
+    device: str = Field("cpu", description="cpu | 0 | 0,1 ...")
+    imgsz: int = 640
+    conf: float = Field(0.25, description="置信度阈值：低于它的框不会成为伪标签")
+    iou: float = 0.7
+    max_det: int = 300
+    fmt: str = Field("", description="格式名；空则按扩展名推断")
+    source_id: str = Field("prelabel", description="IR 来源标识")
+    limit: int = Field(0, description=">0 时只处理前 N 张（预览用）")
+
+
+class PrelabelJobResponse(BaseModel):
+    ok: bool = True
+    job: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PrelabelJobsResponse(BaseModel):
+    ok: bool = True
+    jobs: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PrelabelSamplesResponse(BaseModel):
+    ok: bool = True
+    total: int = 0
+    offset: int = 0
+    limit: int = 0
+    categories: List[str] = Field(default_factory=list)
+    images: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PrelabelExportRequest(BaseModel):
+    """把预标注结果导出为数据集。"""
+
+    out_name: str = Field("", description="输出目录名；会自动带上 prelabel 前缀")
+    task: str = Field("auto", description="auto | detection | classification")
+    name_style: str = Field("keep", description="keep | source | uid")
+    file_mode: str = Field("copy", description="copy | hardlink | symlink")
+    overwrite: bool = False
+    class_order: Optional[List[str]] = None
+    split: SplitOptions = Field(default_factory=SplitOptions)
+    clean: CleanOptions = Field(default_factory=CleanOptions)
+    taxonomy: TaxonomyOptions = Field(default_factory=TaxonomyOptions)
+
+
+class PrelabelExportResponse(BaseModel):
+    ok: bool = True
+    out_dir: str
+    report: Dict[str, Any]
+    job: Dict[str, Any] = Field(default_factory=dict)
