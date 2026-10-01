@@ -70,6 +70,9 @@ class EvalRuntime:
     emitted_log_seq: int = 0
     finalized: bool = False
     log_handle: Optional[Any] = None
+    # `_finalize` 开始执行即置位、**执行完毕**才结束：
+    # 用于让 stop() 等它跑完再返回，避免拿回一个还停在 stopping 的任务。
+    finalize_done: Optional[threading.Event] = None
 
     @property
     def run_dir(self) -> Path:
@@ -292,7 +295,7 @@ class EvalManager:
             run_dir=str(run_dir),
             created_at=now_iso(),
         )
-        rt = EvalRuntime(job=job, spec=spec)
+        rt = EvalRuntime(job=job, spec=spec, finalize_done=threading.Event())
         with self._lock:
             self._runtimes[job.id] = rt
 
@@ -487,6 +490,9 @@ class EvalManager:
 
     def _finalize(self, rt: EvalRuntime, returncode: Optional[int]) -> None:
         if rt.finalized:
+            # 已有人在收尾：等它真正跑完再返回，否则调用方会看到中间状态
+            if rt.finalize_done is not None:
+                rt.finalize_done.wait(timeout=10.0)
             return
         rt.finalized = True
 
@@ -551,6 +557,9 @@ class EvalManager:
                 "artifacts": list_artifacts(rt.run_dir),
             },
         )
+        # 收尾彻底完成，唤醒可能正在等它的 stop()
+        if rt.finalize_done is not None:
+            rt.finalize_done.set()
 
     def _emit_status(self, rt: EvalRuntime) -> None:
         self._emit(
@@ -590,7 +599,7 @@ class EvalManager:
 
     def _load_one(self, job: EvalJob) -> None:
         spec = EvalSpec.from_dict(job.spec or {})
-        rt = EvalRuntime(job=job, spec=spec)
+        rt = EvalRuntime(job=job, spec=spec, finalize_done=threading.Event())
         self._load_log_history(rt)
 
         if is_active(job.status):

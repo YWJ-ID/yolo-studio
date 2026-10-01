@@ -291,6 +291,54 @@ verify：重新计算大小与 sha256，与导出时的基线比对
 
 ---
 
+## 实时验证（M6）
+
+```
+已训练权重（.pt / .onnx / TorchScript ...）
+      │  InferSpec：权重 / 类名 / 设备 / imgsz（会话级）
+      ▼
+  常驻推理子进程（core.infer.worker）
+      │  JSON Lines 协议：load / frame / close
+      │  参数可逐帧调：conf / iou / max_det
+      ▼
+  FrameResult：绝对像素 xyxy + 类名 + 置信度（与统一 IR 一致）
+      │
+      ▼
+  摄像头 / 图片 / 视频 → 画框叠加（实时显示，不落盘）
+```
+
+要点：
+
+- **与评估（M3）的区别**：M3 有真值、算 mAP；M6 **没有真值**，只把识别结果画出来给人看。
+  它不是第二个评估模块。
+- **推理在常驻子进程里**：API 进程不加载 torch。与训练/评估/导出不同的是，
+  M6 要反复喂帧，逐帧起进程不可用，因此进程常驻、走 **JSON Lines** 协议。
+- **画面怎么传**（方案 A）：浏览器 `getUserMedia` 抓帧 → WebSocket → 后端推理 → 回传叠加。
+  这样后端**不需要 `opencv`**，也不要求后端跑在插着摄像头的机器上。
+- **帧率是取舍**：CPU 上约 **3~15 FPS**，够「肉眼验证」不够流畅视频；
+  前端做丢帧防延迟堆积。
+- **格式能力如实探测**：`.pt` 必支持；ONNX 需要 `onnxruntime`；
+  其余格式（OpenVINO / TensorRT / TFLite / CoreML）缺运行时就在启动前说明缺什么。
+- **类名来源要清楚**：ultralytics 导出的 ONNX 通常把类名写进了文件（可自动读出），
+  但**不保证**有；没有时必须在界面上显式提供类别清单，否则框上只能是 `class_0` 之类的名字。
+  界面上会显示类名到底来自「模型自带」还是「你填写的」。
+
+接口（`app/api/routes/infer.py`）：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/infer/formats` | 可推理格式与本机可用性 |
+| GET | `/api/infer/weights` | 可选权重（模型库 + 导出产物） |
+| GET | `/api/infer/session` | 当前推理会话状态 |
+| POST | `/api/infer/models` | 加载权重 |
+| POST | `/api/infer/image` | 单张图片推理（本地路径或 base64） |
+| POST | `/api/infer/close` | 关闭会话 |
+| WS | `/api/infer/ws` | 实时流（含背压丢帧） |
+
+> 前端验证页（M6-06）已实现并通过真实浏览器验证；视频模式的逐帧送检**有意留到后续**（页面上如实说明）。
+
+---
+
 ## 核心设计决策
 
 ### 1. 统一中间表示（Canonical IR）先于一切

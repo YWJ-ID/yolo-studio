@@ -179,6 +179,73 @@ export interface ClassDistributionItem {
   share: number
 }
 
+// ---------- M6 实时验证 ----------
+
+export interface InferFormatInfo {
+  name: string
+  label: string
+  suffixes: string[]
+  requires: string[]
+  task_hint: string
+  note: string
+  available: boolean
+  reason: string
+}
+
+export interface InferSessionState {
+  alive: boolean
+  loaded: boolean
+  task: string
+  classes: string[]
+  num_classes: number
+  weights: string
+  format: string
+  device: string
+  imgsz: number
+  last_error: string
+  /** 类名来源：request = 显式指定，model = 模型自带，空 = 都没有 */
+  class_source?: string
+}
+
+export interface InferFormatsResponse {
+  formats: InferFormatInfo[]
+  active: InferSessionState | null
+}
+
+export interface InferWeightItem {
+  value: string
+  label: string
+  source: string
+  model_id: string
+  task: string
+  classes: string[]
+  format: string
+  exists: boolean
+}
+
+export interface InferDetection {
+  class_index: number
+  class_name: string
+  confidence: number | null
+  bbox: [number, number, number, number]
+  mask_area_ratio: number | null
+}
+
+export interface InferFrameResult {
+  ok: boolean
+  error: string
+  frame_id: number | null
+  duration_ms: number | null
+  task: string
+  width: number
+  height: number
+  detections: InferDetection[]
+  top1: { class_index: number; class_name: string; confidence: number | null } | null
+  topk: { class_index: number; class_name: string; confidence: number | null }[]
+  class_names: string[]
+  num_detections: number
+}
+
 export interface Histogram {
   labels: string[]
   counts: number[]

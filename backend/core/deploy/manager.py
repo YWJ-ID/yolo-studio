@@ -67,6 +67,8 @@ class DeployRuntime:
     emitted_log_seq: int = 0
     finalized: bool = False
     log_handle: Optional[Any] = None
+    # `_finalize` 执行完毕才置位：让 stop() 等它跑完，避免返回一个仍停在中间态的任务。
+    finalize_done: Optional[threading.Event] = None
 
     @property
     def run_dir(self) -> Path:
@@ -293,7 +295,7 @@ class DeployManager:
             run_dir=str(run_dir),
             created_at=now_iso(),
         )
-        rt = DeployRuntime(job=job, spec=spec)
+        rt = DeployRuntime(job=job, spec=spec, finalize_done=threading.Event())
         with self._lock:
             self._runtimes[job.id] = rt
 
@@ -488,6 +490,9 @@ class DeployManager:
 
     def _finalize(self, rt: DeployRuntime, returncode: Optional[int]) -> None:
         if rt.finalized:
+            # 已有人在收尾：等它真正跑完再返回，否则调用方会看到中间状态
+            if rt.finalize_done is not None:
+                rt.finalize_done.wait(timeout=10.0)
             return
         rt.finalized = True
 
@@ -542,6 +547,9 @@ class DeployManager:
                 "result": result.to_dict() if result else None,
             },
         )
+        # 收尾彻底完成，唤醒可能正在等它的 stop()
+        if rt.finalize_done is not None:
+            rt.finalize_done.set()
 
     def _emit_status(self, rt: DeployRuntime) -> None:
         self._emit(
@@ -579,7 +587,7 @@ class DeployManager:
 
     def _load_one(self, job: DeployJob) -> None:
         spec = DeploySpec.from_dict(job.spec or {})
-        rt = DeployRuntime(job=job, spec=spec)
+        rt = DeployRuntime(job=job, spec=spec, finalize_done=threading.Event())
         self._load_log_history(rt)
 
         if is_active(job.status):

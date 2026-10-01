@@ -690,6 +690,114 @@ def _cmd_eval(args) -> int:
     return 0 if final.status == "finished" else 1
 
 
+def _cmd_infer(args) -> int:
+    """用权重对图片推理（M6 实时验证的命令行版，不经 FastAPI）。"""
+    from core.infer import (
+        InferOptions,
+        InferSession,
+        InferSpec,
+        capability_report,
+        detect_weights_format,
+    )
+
+    if args.list_formats:
+        for item in capability_report():
+            mark = "可用" if item["available"] else f"不可用：{item['reason']}"
+            print(f"  {item['name']:<12} {item['label']:<22} {mark}")
+        return 0
+
+    if not args.weights:
+        print("请指定 --weights（或使用 --list-formats）", file=sys.stderr)
+        return 1
+    if not args.images:
+        print("请至少给一张图片路径", file=sys.stderr)
+        return 1
+
+    device = resolve_device(args.device or os.environ.get("YOLO_STUDIO_DEVICE", "auto"))
+    classes = [c.strip() for c in str(args.classes).split(",") if c.strip()]
+
+    try:
+        fmt = detect_weights_format(args.weights)
+    except ValueError as exc:
+        print(f"权重格式无法识别: {exc}", file=sys.stderr)
+        return 1
+
+    spec = InferSpec(
+        weights=args.weights,
+        task=args.task or "",
+        classes=classes,
+        device=device,
+        imgsz=args.imgsz,
+        fmt=fmt,
+        source="cli",
+    )
+    options = InferOptions(conf=args.conf, iou=args.iou, max_det=args.max_det)
+
+    session = InferSession(python=sys.executable)
+    payloads = []
+    try:
+        info = session.load(spec)
+        print(f"权重      : {args.weights}")
+        print(f"格式      : {fmt}   任务: {info['task']}   设备: {device}")
+        print(f"类别({info['num_classes']})  : {', '.join(info['classes']) or '(无)'}")
+        print("")
+
+        for img in args.images:
+            result = session.infer_path(img, options)
+            payloads.append({"image": img, "result": result.to_dict()})
+
+            if result.task == "classify":
+                top1 = result.top1 or {}
+                print(
+                    f"  {Path(img).name:<28} {top1.get('class_name', '?')}"
+                    f"  ({top1.get('confidence')})  {result.duration_ms} ms"
+                )
+            else:
+                print(f"  {Path(img).name:<28} {len(result.detections)} 个框  {result.duration_ms} ms")
+                for det in result.detections[:10]:
+                    x1, y1, x2, y2 = det.bbox
+                    print(
+                        f"      {det.class_name:<16} conf={det.confidence}"
+                        f"  [{x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f}]"
+                    )
+    finally:
+        session.stop()
+
+    if args.save:
+        _save_annotated(args.save, payloads)
+
+    if args.json:
+        print(json.dumps(payloads, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _save_annotated(out_dir: str, payloads: List[dict]) -> None:
+    """把带框的结果图保存下来（CLI 专用的事后可视化）。"""
+    try:
+        import cv2
+    except Exception as exc:
+        print(f"保存结果图需要 opencv: {exc}", file=sys.stderr)
+        return
+
+    target = Path(out_dir).expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    for entry in payloads:
+        img_path = entry["image"]
+        result = entry["result"]
+        image = cv2.imread(img_path)
+        if image is None:
+            continue
+        for det in result["detections"]:
+            x1, y1, x2, y2 = (int(v) for v in det["bbox"])
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 200, 0), 2)
+            label = f"{det['class_name']} {det['confidence']}"
+            cv2.putText(image, label, (x1, max(12, y1 - 4)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1, cv2.LINE_AA)
+        dst = target / Path(img_path).name
+        cv2.imwrite(str(dst), image)
+        print(f"  已保存: {dst}")
+
+
 def _cmd_export_model(args) -> int:
     """把权重导出为部署格式（core 层独立可用，不经 FastAPI）。"""
     from core.deploy import DeployManager, DeploySpec, capability_report, is_active as deploy_active
@@ -972,6 +1080,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list-formats", action="store_true", help="只列出格式与本机可用性")
     p.add_argument("--json", action="store_true", help="以 JSON 输出完整结果")
     p.set_defaults(func=_cmd_export_model)
+
+    p = sub.add_parser("infer", help="用权重对图片推理，验证识别情况（M6 实时验证的命令行版）")
+    p.add_argument("images", nargs="*", help="一个或多个图片路径")
+    p.add_argument("--weights", default="", help="权重文件路径（.pt / .onnx / ...）")
+    p.add_argument("--classes", default="", help="逗号分隔的类名；ONNX 等不带类名的格式必须给")
+    p.add_argument("--task", default="", help="detect | classify | segment；空则由模型决定")
+    p.add_argument("--imgsz", type=int, default=640)
+    p.add_argument("--device", default="", help="cpu | cuda:0；默认读 YOLO_STUDIO_DEVICE")
+    p.add_argument("--conf", type=float, default=0.25, help="置信度阈值")
+    p.add_argument("--iou", type=float, default=0.7, help="NMS IoU 阈值")
+    p.add_argument("--max-det", type=int, default=300, help="最多保留多少个框")
+    p.add_argument("--save", default="", help="把带框的结果图保存到该目录")
+    p.add_argument("--list-formats", action="store_true", help="只列出可推理格式与本机可用性")
+    p.add_argument("--json", action="store_true", help="以 JSON 输出完整结果")
+    p.set_defaults(func=_cmd_infer)
 
     return parser
 

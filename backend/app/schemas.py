@@ -498,6 +498,90 @@ class HealthResponse(BaseModel):
     storage_dir: str
 
 
+# ---------------------------------------------------------------------------
+# M6 实时验证
+# ---------------------------------------------------------------------------
+
+
+class InferFormatInfo(BaseModel):
+    """一种可推理权重格式及其实机可用性。"""
+
+    name: str
+    label: str
+    suffixes: List[str] = Field(default_factory=list)
+    requires: List[str] = Field(default_factory=list)
+    task_hint: str = ""
+    note: str = ""
+    available: bool = True
+    reason: str = ""
+
+
+class InferFormatsResponse(BaseModel):
+    formats: List[InferFormatInfo] = Field(default_factory=list)
+    active: Optional[Dict[str, Any]] = Field(None, description="当前推理会话状态")
+
+
+class InferWeightItem(BaseModel):
+    """一个可选权重。"""
+
+    value: str = Field(..., description="权重路径")
+    label: str
+    source: str = Field("model_library", description="model_library | deploy | external")
+    model_id: str = ""
+    task: str = ""
+    classes: List[str] = Field(default_factory=list)
+    format: str = ""
+    exists: bool = True
+
+
+class InferWeightsResponse(BaseModel):
+    weights: List[InferWeightItem] = Field(default_factory=list)
+
+
+class InferLoadRequest(BaseModel):
+    """加载权重。"""
+
+    weights: str
+    name: str = ""
+    task: str = Field("", description="detect | classify | segment；空则由模型决定")
+    classes: List[str] = Field(
+        default_factory=list,
+        description="显式类别清单，优先于模型自带的类名；ONNX 未写入类名时必须提供",
+    )
+    device: str = Field("cpu", description="cpu | 0 | 0,1 ...")
+    imgsz: int = 640
+    half: bool = False
+    fmt: str = Field("", description="格式名；空则按扩展名推断")
+
+
+class InferSessionResponse(BaseModel):
+    ok: bool = True
+    session: Dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+
+
+class InferImageRequest(BaseModel):
+    """单张图片推理。二选一：path（服务器本地）或 image（base64）。"""
+
+    path: str = ""
+    image: str = Field("", description="base64 编码的图片（不含 data: 前缀）")
+    conf: float = 0.25
+    iou: float = 0.7
+    max_det: int = 300
+    only_classes: List[int] = Field(default_factory=list)
+
+
+class InferImageResponse(BaseModel):
+    ok: bool = True
+    result: Dict[str, Any] = Field(default_factory=dict)
+    error: str = ""
+
+
+class InferCloseResponse(BaseModel):
+    ok: bool = True
+    closed: bool = False
+
+
 class EnvResponse(BaseModel):
     python: str
     python_executable: str = Field("", description="实际运行后端的解释器路径")

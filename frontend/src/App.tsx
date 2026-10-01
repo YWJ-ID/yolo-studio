@@ -15,6 +15,7 @@ const TrainDetail = lazy(() => import('./pages/TrainDetail'))
 const ModelLibrary = lazy(() => import('./pages/ModelLibrary'))
 const ModelCompare = lazy(() => import('./pages/ModelCompare'))
 const ModelDetail = lazy(() => import('./pages/ModelDetail'))
+const VerifyCenter = lazy(() => import('./pages/VerifyCenter'))
 const Settings = lazy(() => import('./pages/Settings'))
 
 export default function App() {
@@ -35,6 +36,8 @@ export default function App() {
         <Route path="/models" element={<ModelLibrary />} />
         <Route path="/models/compare" element={<ModelCompare />} />
         <Route path="/models/:modelId" element={<ModelDetail />} />
+
+        <Route path="/verify" element={<VerifyCenter />} />
 
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

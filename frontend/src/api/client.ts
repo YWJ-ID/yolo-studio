@@ -17,6 +17,10 @@ import type {
   EvalResult,
   ExportReport,
   HealthResponse,
+  InferFormatsResponse,
+  InferFrameResult,
+  InferSessionState,
+  InferWeightItem,
   LogsPage,
   MetricsSeries,
   ModelCard,
@@ -255,6 +259,40 @@ export const api = {
   verifyDeploy: (id: string) =>
     http
       .get<{ ok: boolean; verify: DeployVerifyReport }>(`/api/deploy/jobs/${encodeURIComponent(id)}/verify`)
+      .then((r) => r.data),
+
+  // ---------- 实时验证（M6） ----------
+  inferFormats: () => http.get<InferFormatsResponse>('/api/infer/formats').then((r) => r.data),
+
+  inferWeights: () =>
+    http.get<{ weights: InferWeightItem[] }>('/api/infer/weights').then((r) => r.data),
+
+  inferSession: () =>
+    http.get<{ ok: boolean; session: InferSessionState }>('/api/infer/session').then((r) => r.data),
+
+  loadInferModel: (payload: {
+    weights: string
+    task?: string
+    classes?: string[]
+    device?: string
+    imgsz?: number
+    fmt?: string
+  }) =>
+    http
+      .post<{ ok: boolean; session: InferSessionState }>('/api/infer/models', payload)
+      .then((r) => r.data),
+
+  closeInferSession: () => http.post<{ ok: boolean; closed: boolean }>('/api/infer/close').then((r) => r.data),
+
+  inferImage: (payload: {
+    path?: string
+    image?: string
+    conf?: number
+    iou?: number
+    max_det?: number
+  }) =>
+    http
+      .post<{ ok: boolean; result: InferFrameResult }>('/api/infer/image', payload)
       .then((r) => r.data),
 }
 

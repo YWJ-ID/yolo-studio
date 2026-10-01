@@ -82,6 +82,8 @@ class JobRuntime:
     emitted_status: str = ""
     finalized: bool = False
     log_handle: Optional[Any] = None
+    # `_finalize` 执行完毕才置位：让 stop() 等它跑完，避免返回一个仍停在中间态的任务。
+    finalize_done: Optional[threading.Event] = None
 
     @property
     def run_dir(self) -> Path:
@@ -318,7 +320,7 @@ class TrainingManager:
             created_at=now_iso(),
             epochs_total=spec.epochs,
         )
-        rt = JobRuntime(job=job, spec=spec)
+        rt = JobRuntime(job=job, spec=spec, finalize_done=threading.Event())
         with self._lock:
             self._runtimes[job.id] = rt
 
@@ -597,6 +599,9 @@ class TrainingManager:
 
     def _finalize(self, rt: JobRuntime, returncode: Optional[int]) -> None:
         if rt.finalized:
+            # 已有人在收尾：等它真正跑完再返回，否则调用方会看到中间状态
+            if rt.finalize_done is not None:
+                rt.finalize_done.wait(timeout=10.0)
             return
         rt.finalized = True
 
@@ -649,6 +654,9 @@ class TrainingManager:
                 "artifacts": list_artifacts(rt.run_dir),
             },
         )
+        # 收尾彻底完成，唤醒可能正在等它的 stop()
+        if rt.finalize_done is not None:
+            rt.finalize_done.set()
 
     def _emit_status(self, rt: JobRuntime) -> None:
         rt.emitted_status = rt.job.status
@@ -700,7 +708,7 @@ class TrainingManager:
 
     def _load_one(self, job: TrainingJob) -> None:
         spec = TrainSpec.from_dict(job.spec or {})
-        rt = JobRuntime(job=job, spec=spec)
+        rt = JobRuntime(job=job, spec=spec, finalize_done=threading.Event())
         # 先恢复历史日志，接管提示才会排在其后
         self._load_log_history(rt)
 

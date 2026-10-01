@@ -16,9 +16,12 @@
 | **M4 部署导出** | **3/3** | **完成** |
 | M5 前端界面 | **11/11** | **完成**（含 M5-09 路由级分割、M5-10 ECharts 按需引入、M5-11 设置页） |
 
-**测试现状：810 断言全部通过**（9 个测试文件，见第四节）。
+**测试现状：907 断言全部通过**（10 个测试文件，见第四节）。
 
 **下一步任务**：M0~M5 全部完成，MVP 闭环（数据 → 训练 → 评估 → 模型库 → 导出）。
+**M6 实时验证 8/8 已完成**（含前端页面，已在真实浏览器里验证摄像头与叠加）。
+M7 预标注（模型批量标框）设计已定稿但未开工，见 `PROGRESS.md` 的 M7 章节。
+M6 的可选后续：视频模式的逐帧送检（当前有意未做，页面上如实说明）。
 可选优化见 `PROGRESS.md` 风险表，例如 R-32（antd / echarts 的 vendor chunk 仍偏大）
 与 R-33（M5 页面建议在有浏览器的环境再复核一次交互）。
 
@@ -69,9 +72,11 @@
 
 **本机无 CUDA** → 训练以 CPU 运行；可视化在无 GPU 时降级为仅 CPU 面板（已实现，见 M2-05）。
 
-**未安装的可选依赖**（影响能力探测结果，不是 bug）：`onnx` / `onnxruntime` / `openvino` /
-`tensorflow` / `coremltools` / `rknn-toolkit2` 均未安装 → M4 里只有 **TorchScript** 可用。
-`pandas` 也未安装（ultralytics 的 `export_formats()` 用不了，因此本项目自建格式清单，不依赖它）。
+**未安装的可选依赖**（影响能力探测结果，不是 bug）：`openvino` /
+`tensorflow` / `coremltools` / `rknn-toolkit2` 均未安装。
+**已安装**：`onnx` + `onnxslim`（ONNX **导出**可用）、`onnxruntime==1.19.2`（ONNX **推理**可用，M6-07）、
+`httpx`（测试用，FastAPI TestClient 依赖它）、`cv2`（仅 CLI 的 `infer --save` 用到，M6 方案 A 不需要）。
+`pandas` 未安装（ultralytics 的 `export_formats()` 用不了，因此本项目自建格式清单，不依赖它）。
 
 **当前后端状态**：已在本机 8010 端口运行（`uvicorn app.main:app`，非 `--reload`）。
 改完后端代码需重启进程才会生效：
@@ -157,6 +162,7 @@ cd backend
 .\.venv\Scripts\python.exe tests\test_train.py       # 142 训练模块（调度/指标/日志/资源/产物/API/WS）
 .\.venv\Scripts\python.exe tests\test_eval.py        # 147 评估与模型库（结果归一化/报告/注册/对比/API）
 .\.venv\Scripts\python.exe tests\test_deploy.py      # 103 部署导出（格式探测/哈希校验/生命周期/API/联动）
+.\.venv\Scripts\python.exe tests\test_infer.py       # 97  M6 实时验证（格式/归一化/会话/协议/API/背压/类名来源）
 ```
 
 > Windows 控制台是 GBK，含 `²` 等字符的输出会抛 `UnicodeEncodeError`。
@@ -232,18 +238,22 @@ cd backend
 - PROGRESS.md（进度、已决策事项、风险项）
 - README.md（架构与设计决策）
 
-M0~M5 已全部完成：M1 数据模块（12/12）、M2 训练（7/7）、M3 评估与模型库（4/4）、
-M4 部署导出（3/3）、M5 前端界面（9/9），测试 810 断言通过，前端 `npm run build` 通过。
+M0~M6 已完成：M1 数据模块（12/12）、M2 训练（7/7）、M3 评估与模型库（4/4）、
+M4 部署导出（3/3）、M5 前端界面（11/11）、M6 实时验证（8/8，含前端页面，已真实浏览器验证）。
+测试 907 断言通过，前端 `npm run build` 通过。
 
 后续可做的事（按需选择，先读 PROGRESS.md 风险表）：
+- 开工 M7 预标注（模型批量标框 → IR → 导出）；设计已定稿，见 PROGRESS.md M7 章节与 R-37；
+- M6 视频模式的逐帧送检（当前有意未做）；
 - 在有浏览器的环境复核 M5 页面交互（R-33）；
 - 用 manualChunks / echarts 按需引入继续压缩 vendor chunk（R-32）；
-- 需要时安装 onnx 等可选依赖，解锁更多导出格式（R-28）。
+- 需要时安装 openvino 等可选依赖，解锁更多导出/推理格式。
+  （onnx / onnxslim / onnxruntime 已装，ONNX 导出与推理均已真实跑通。）
 
 动手前先跑一遍测试确认基线，每完成一个任务更新 PROGRESS.md（含验证记录与变更记录）。
 
 注意：本机无 CUDA（CPU 训练），可视化需支持无 GPU 降级。
-训练/评估/导出相关坑见 HANDOFF.md 第七、八、九节；前端坑见「前端现状」小节。
+训练/评估/导出相关坑见 HANDOFF.md 第七、八、九节；M6 坑见第十节；前端坑见「前端现状」小节。
 ```
 
 ---
@@ -390,3 +400,43 @@ storage/deploys/<deploy_id>/   deploy_spec.json / deploy_result.json / deploy.lo
   大小不一致时不再算哈希（省一次全文件读取）。
 - **测试里的假导出后端**要注入 `format_checker`，否则本机缺包会导致 `onnx` 等格式被拒绝。
 - `Manager` 的 `on_finish` 回调排在 `finished` 事件之前（与训练/评估一致）。
+
+---
+
+## 十、M6 实时验证的文件地图（后端已完成，前端待做）
+
+设计文档：`docs/m6-realtime-verify.md`（定位、方案取舍、风险，动手前先读）。
+
+```
+core/infer/
+├── formats.py            推理格式清单 + 能力探测（find_spec，不 import 重依赖）
+├── spec.py               InferSpec（会话级：权重/类名/设备/imgsz）+ InferOptions（帧级：conf/iou）
+├── result.py             FrameResult / Detection + build_frame_result()（纯函数归一化）
+├── ultralytics_infer.py  真正的推理（唯一 import ultralytics/torch 处）
+├── worker.py             常驻推理子进程入口：python -m core.infer.worker（JSON Lines 协议）
+└── session.py            InferSession：主进程侧的子进程生命周期 + 请求-响应配对
+app/services_infer.py     推理会话单例 + 权重来源发现（模型库 + 导出产物）
+app/api/routes/infer.py   /api/infer/*
+tests/test_infer.py       89 断言
+cli 的 infer 子命令        命令行推理（--list-formats / 多图 / --json / --save）
+```
+
+### M6 的关键约定（改前必读）
+
+1. **这是常驻子进程，不是一次性任务**。训练/评估/导出都是「起进程→跑完→退出」，
+   M6 要反复喂帧，逐帧起进程要几秒（import torch），不可用。因此走
+   stdin/stdout 的 **JSON Lines** 协议。协议内容见 `worker.py` 顶部注释。
+2. **会话不是线程安全的**（R-39）。`InferSession` 用共享字典做请求-响应配对，
+   必须串行调用：API 层用 `services_infer.session_lock()`，WS 用 `pending/processing` 状态机。
+3. **崩溃感知不能只靠读线程**（R-38）。Windows 上 `for line in proc.stdout` 不保证在
+   子进程退出时立即返回，等待循环要主动 `poll()`（`InferSession._check_dead`）+ 有界 `wait(0.5s)`。
+   否则「子进程崩溃」会被误报成「超时」。
+4. **帧率上限是设计取舍**（R-35）。方案 A（浏览器抓帧→WS→后端推理）在 CPU 上约 3~15 FPS，
+   够「肉眼验证」不够流畅视频。前端必须做**丢帧**防延迟堆积——不是 bug，不要试图靠排队解决。
+5. **ONNX 的类名不一定有**。ultralytics 导出时通常会把 names 写进 ONNX metadata（`YOLO()` 能读出），
+   但**不保证**——没有时必须在请求里给 `classes`，否则只能显示 `class_0`。
+   类名的解析必须走 `ultralytics_infer.resolve_names()`，**不要**在别处再读一次 `model.names`
+   （R-41 就是这么踩出来的：加载时显示一套类名、框上是另一套）。
+6. **M6 不落盘、不产数据集**。它是「显示」，伪标注是 M7 的事（见 R-37，必须人工复核）。
+7. **前端页面已完成并真实浏览器验证**（摄像头出画面、叠加生效）。**视频模式的逐帧送检未实现**——
+   页面上如实写了，不要留「点了没反应的假按钮」。
