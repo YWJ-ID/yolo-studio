@@ -8,7 +8,7 @@
 - 技术栈：FastAPI (Python 3.9) + React 18 + Ant Design 5 + ECharts
 - 数据存储：文件系统（数据集版本自带的 `dataset_card.json` 记录血缘，无需数据库）
 - 训练后端：ultralytics（一期），预留 `TrainerBackend` 抽象
-- 最近更新：2026-09-30
+- 最近更新：2026-10-02
 
 > 新会话/新协作者请先读 [`docs/HANDOFF.md`](docs/HANDOFF.md)：
 > 里面有协作约定、环境事实、验证方式与可直接粘贴的续作提示。
@@ -21,8 +21,8 @@
 |---|---|---|---|
 | M0 | 项目骨架 | 5/5 | 已完成 |
 | M1 | 数据模块 | 12/12 | **已完成** |
-| M2 | 训练模块 | 7/7 | **已完成** |
-| M3 | 评估与模型库 | 4/4 | **已完成** |
+| M2 | 训练模块 | 8/8 | **已完成**（含 M2-08 自定义/上传基础模型） |
+| M3 | 评估与模型库 | 5/5 | **已完成**（含 M3-05 导入外部模型） |
 | M4 | 部署导出 | 3/3 | **已完成** |
 | M5 | 前端界面 | 11/11 | **已完成** |
 | M6 | 实时验证 | 8/8 | **已完成**（含前端页面，已真实浏览器验证） |
@@ -77,6 +77,7 @@
 | M2-05 | 资源监控（GPU pynvml / CPU psutil） | 已完成 | `core/train/resources.py`；无 NVIDIA 时降级为 `gpu.available=false + error`，CPU 数据始终可用；`resolve_device` 仅在 auto 时附带 import torch |
 | M2-06 | 训练过程图像预览（增强图 / 预测图） | 已完成 | `core/train/artifacts.py`；按 val_pred / val_labels / train_batch / labels / curve / matrix 分组，只回传文件名，访问走受限接口 |
 | M2-07 | 实时日志流（stdout → 网页终端） | 已完成 | stdout+stderr 合并读取（按 `\r`/`\n` 切分），内存环形缓冲 + `train.log` 落盘，重启后从文件恢复历史 |
+| M2-08 | 自定义/上传基础模型 | 已完成 | `core/train/weights.py` 汇总候选（内置结构文件/预训练、权重目录、模型库、历史训练产物）并去重；新增 `GET/POST /api/train/weights`（上传 `.pt/.yaml`，默认不覆盖、`.part` 原子落盘、算 sha256、4GB 上限）；新建训练页权重改为动态候选 + 上传按钮 |
 
 ## M3 评估与模型库
 
@@ -86,6 +87,7 @@
 | M3-02 | 指标表与图表（PR / F1 / 混淆矩阵） | 已完成 | 逐类指标表 + 混淆矩阵（含 background，标注方向）+ 各类 AP 条形图；ultralytics 的 PR/F1 曲线与混淆矩阵 PNG 按需内嵌，另有单文件 HTML 报告 `/api/eval/jobs/{id}/report` |
 | M3-03 | 模型注册（关联数据集版本 + 训练配置） | 已完成 | `core/registry/`：每个模型一份 `model_card.json`（`storage/models/<job_id>/`），记录权重路径、训练超参、数据集血缘（反查 `dataset_card.json`，无卡片时读 data.yaml 的 names）与评估结果索引；训练完成自动注册 |
 | M3-04 | 多模型 / 多实验对比 | 已完成 | `core/eval/compare.py` + `POST /api/models/compare`；总体指标表 + 逐类 AP50-95 对比；**不同划分会明确提示不具备可比性**，缺失指标留空不补 0 |
+| M3-05 | 导入外部模型（对齐模型库） | 已完成 | `core/registry.ModelRegistry.register_external()` + `POST /api/models/import`；**目前仅支持 `.pt`**（评估走 ultralytics val、导出有完整链路）。无训练任务，`training.source=external`；同一权重文件重复导入返回同一卡片；`data.yaml` 可选（不提供则只能导出、不能评估，界面禁用评估并说明）。前端模型库「导入外部模型」弹窗 + 列表/详情「外部导入」标记 |
 
 ## M4 部署导出
 
@@ -214,6 +216,7 @@
 | R-45 | **预标注任务存在内存里** | 已决策 | M7 的预标注任务（含未导出的 IR）保存在后端进程内存中，服务重启即丢失。理由：预标注是「跑一次 → 复核 → 导出」的一次性流程，把整批 IR 落盘会与数据集存储重复；重启后重跑即可。界面上标注了「仅本次后端进程内」 |
 | R-46 | **预标注任务疑似串行推理**（自查） | 已更正 | 首版实现里 `_run_job` 逐张同步推理；实测 6 张 CPU 3.3s、5 张 ONNX 4.8s，批量几百张会较久。这是 CPU 推理的固有代价（与 M6 同源），不是缺陷。任务在后台线程跑、前端轮询，不阻塞 HTTP |
 | R-47 | **`test_train` 存在环境相关的偶发失败（既有，与 M7 无关）** | 已知悉 | 现象：`test_api_layer` 偶尔在 `wait_terminal` 上**超时 25s**（失败运行总耗时 ~52s vs 正常 ~28s，差 ≈ 超时时间），随后 3 条断言失败（指标 1/2 行、增量取指标为空、已结束任务 stop 未 409），**无异常栈**——说明监控线程在 25s 内含异常地「没有收尾」。实测频率：单跑 `test_train.py` 约 1/8~1/12，**全量套件连跑时约 1/3**；把同一场景写成独立循环跑 40 次、以及给 `_finalize` 加异常探针后连跑 15 次，均**不复现**，故强依赖测试文件上下文 / 机器负载，而非单段逻辑。涉事代码是 `core/train/manager.py`（**M7 完全未改动**）。两个怀疑点：①`_finalize` 先置 `rt.finalized=True` 再干活，若中途抛错则再次进入只会 `finalize_done.wait()` 而永不落终态（R-42 的 `finalize_done` 会让这种 wedge「静默等待」）；②监控线程被 OS/AV 抢占长时间未 tick。**同类偶发也见于 `test_eval`**（一次性连跑 5 个文件时出现 140/2，单独跑仍 147 全过），指向环境/负载而非某个模块。**当前结论：以单次全量运行为准，但该文件并非稳定全绿。** 根治方向：收尾体加 `try/finally` 兜底落终态 + 给监控循环加看门狗；测试侧延长超时并打印超时诊断 |
+| R-48 | **外部导入模型的权重只引用、不复制** | 已决策 | `register_external` 把 `.pt` 的原路径记进 `weights.best`，不复制进模型库——与「模型卡只记引用、不复制权重」的既有决策一致（R-26），避免同一模型出现两份文件。代价同训练目录：**原文件被移动/删除后该模型失效**（详情页与列表会显示权重路径，可据此排查）。只支持 `.pt`，因为 ONNX/TorchScript 无法做 ultralytics val，登记进来会让「发起评估」变成坑 |
 
 ---
 
@@ -310,6 +313,11 @@
 | 2026-09-30 | **真实 CLI 联调（M7 CLI + 真实 ONNX，证明有框）** | `cli.main prelabel` 用 DMS ONNX（5 类，`best_raw.onnx`）对 5 张图：**15 个框**（Phone 12 / Cigarette 3），导出 train3/val1/test1、`boxes_exported=15`；**磁盘上 labels 逐文件 6+1+4+3+1=15 行**，与报告一致；`dataset_card.json` 的 `prelabel` 段完整（权重/conf/iou/classes/disclaimer） |
 | 2026-09-30 | 前端 `npm run build`（M7 向导页） | 通过；新增 `pages/PrelabelWizard.tsx`（三步向导，chunk 38.0 kB）、`/prelabel` 路由与「预标注」菜单 |
 | 2026-09-30 | M7 API 错误路径 | 不存在的任务 404、图片目录不存在 404、权重不存在 404（启动前拒绝，不跑空任务） |
+| 2026-09-30 | 新增 **M3-05 导入外部模型（.pt）** 测试（并入 `test_eval.py`） | `test_eval` 147 → **174 断言**，全部通过；覆盖自动 id / 展示名 / 权重引用 / 来源标记 / 类别取自 data.yaml / 重复导入去重 / 拒绝非 `.pt` / 拒绝不存在的权重与 data.yaml / 非法任务类型 / 显式 id 清洗与冲突 / 外部模型可评估并挂卡片 / 无 data.yaml 时评估 400 / API 导入与错误路径 |
+| 2026-09-30 | **真实端到端（外部权重）**：导入 → 评估 → 导出 | 把 `smoke_e3/weights/best.pt` 当作外部权重经 `POST /api/models/import` 导入（`source=external`，类别取自 data.yaml）；再导入同权重返回同一卡片（去重）；`POST /api/models/{id}/eval` 真实评估 `finished`（overall 有 6 项指标，冒烟模型全 0 属正常）并自动挂到卡片；`POST /api/deploy/jobs` 真实导出 TorchScript **10.27 MB** 并挂卡；非 `.pt` 与不存在的权重均 400 |
+| 2026-09-30 | 全量测试（含 M3-05 与 M7） | **1031 断言全部通过**（11 个测试文件：63/89/58/69/55/84/142/174/103/97/97）；本轮 `test_train` 未复现 R-47 偶发 |
+| 2026-10-01 | 远程/共享部署支持 | `YOLO_STUDIO_CORS_ORIGINS` 生效性实测：设 `http://192.168.1.20:8010; http://gpu.lan:5173,https://yolo.example.com` → 得到 3 条来源；未设时回落到默认 `localhost/127.0.0.1:5173`；`GET /api/system/config` 返回 `cors_origins`。前端 `npm run build` 通过 |
+| 2026-10-02 | Vite 开发服务器主机校验（`server.allowedHosts`） | `frontend/vite.config.ts` 增加 **`VITE_ALLOWED_HOSTS`**（逗号分隔，或 `true`/`all`/`*`）驱动 `server.allowedHosts`，默认不设置=保持原行为。实测（Vite 5.4.21，`npx vite --host 127.0.0.1 --port 5199`）：`Host: 127.0.0.1`→200、`Host: my-test.lan`（已放行）→200、`Host: evil.lan`（未放行）→403 `Blocked request`。用于从别的机器用主机名/域名访问 dev server；IP 访问默认已放行 |
 
 ---
 
@@ -389,5 +397,9 @@
 | 2026-09-30 | 完成 **M7-02 API**：新增 `app/services_prelabel.py`（后台线程任务 + 独立推理会话 + 复用 taxonomy/clean/split/export）与 `app/api/routes/prelabel.py`（formats/weights/jobs/samples/export/delete）；新增 `PrelabelJob` 等 schema |
 | 2026-09-30 | 完成 **M7 前端向导**：`pages/PrelabelWizard.tsx`（权重+目录 → 预览复核 → 生成数据集）+ `/prelabel` 路由与菜单；`api/client.ts`、`types.ts` 补齐 M7 接口与类型。页面与首页注明「伪标签必须人工复核」 |
 | 2026-09-30 | 完成 **M7 CLI**：`cli.main prelabel`（`--list-formats` / `--limit` / `--out` 顺手导出 / `--json`），与 `infer` / `export-model` 风格一致 |
-| 2026-09-30 | **M7 预标注 3/3 全部完成**；新增测试 97 断言。全量应为 **1004 断言**（11 个测试文件）；实测 10 个文件（含 `test_prelabel` 97）**稳定全绿**，唯一不稳的是 `test_train` 的既有偶发（R-47，M7 未改动其代码） |
+| 2026-09-30 | **M7 预标注 3/3 全部完成**；新增测试 97 断言。当时全量应为 **1004 断言**（11 个测试文件）；实测 10 个文件（含 `test_prelabel` 97）**稳定全绿**，唯一不稳的是 `test_train` 的既有偶发（R-47，M7 未改动其代码）。随后完成 M3-05，`test_eval` +27 → **1031 断言** |
 | 2026-09-30 | 复核基线：`test_train.py` 单跑 8 次中 1 次、12 次中 1 次失败；全量套件连跑时约 1/3 失败（均同 3 条断言、耗时 +≈25s，见 R-47）。其余 10 个测试文件连同 `test_prelabel` **零失败**。**更正**：此前「907 全绿」只代表单次运行，`test_train` 本身存在环境相关偶发 |
+| 2026-09-30 | 完成 **M3-05 导入外部模型（.pt）**：`ModelRegistry.register_external()` + `POST /api/models/import`；前端模型库新增「导入外部模型」弹窗，列表/详情显示「外部导入」标记，无 `data.yaml` 时禁用「开始评估」并说明原因 |
+| 2026-09-30 | `ModelSummary` 增加 `source`（training / external）与 `has_data_yaml` 两个字段；`training.source` 默认 `training`，旧卡片完全兼容 |
+| 2026-10-01 | 支持**部署到另一台机器 / 局域网共享访问**：新增 `scripts/start-server.ps1`（单端口生产模式，默认 `0.0.0.0:8010`、不带 `--reload`）；`start-backend.ps1` / `start-frontend.ps1` 增加 `-BindHost` / `-Port` 参数（默认仍是仅本机）；`YOLO_STUDIO_CORS_ORIGINS` 环境变量（分号/逗号分隔，`app/config.py`）；`/api/system/config` 与设置页展示 CORS 来源；`docs/getting-started.md` 新增「部署到另一台机器」章节（含读写白名单、无鉴权、摄像头需 HTTPS 的提醒）；顺带修正文档里过期的测试数量与 `vite.config.ts`/`dev.ps1` 里「后端 8000」的旧注释 |
+| 2026-10-01 | 完成 **M2-08 自定义/上传基础模型**：新增 `core/train/weights.py`（候选汇总：内置 `.yaml`/`.pt`、`YOLO_STUDIO_WEIGHTS` 目录、模型库、历史训练产物；按绝对路径去重、内置同名去重；`normalize_weight_filename` 取 basename + 后缀白名单防目录穿越）；新增 `GET /api/train/weights`（候选项，含 source/task/exists/format）与 `POST /api/train/weights`（上传，默认不覆盖→409、非法后缀→400、超限→413、`.part` 临时文件原子替换、返回 sha256）；前端 `TrainNew.tsx` 权重改为动态候选（按 task 过滤、内置兜底）+「上传自定义权重」按钮；新增 `test_train.py::test_weights`（含路由注册断言）。测试与 `npm run build` 均通过 |

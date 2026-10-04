@@ -97,6 +97,9 @@ class ModelCard:
             "classes": self.classes,
             "dataset_name": (self.dataset or {}).get("name", ""),
             "job_id": (self.training or {}).get("job_id", ""),
+            # training（本项目训练任务注册）| external（外部权重导入）
+            "source": (self.training or {}).get("source", "training") or "training",
+            "has_data_yaml": bool((self.dataset or {}).get("data_yaml")),
             "has_best": bool((self.weights or {}).get("best")),
             "best": (self.training or {}).get("best", {}),
             "eval_splits": sorted({e.get("split", "") for e in self.evals if e.get("split")}),

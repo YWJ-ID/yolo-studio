@@ -4,13 +4,23 @@ import {
   Button,
   Card,
   Empty,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
   Space,
   Table,
   Tag,
   Typography,
   message,
 } from 'antd'
-import { BarChartOutlined, EyeOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  BarChartOutlined,
+  EyeOutlined,
+  ImportOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { ModelSummary } from '../types'
@@ -21,6 +31,17 @@ const { Text, Paragraph } = Typography
 const TASK_LABEL: Record<string, { text: string; color: string }> = {
   detect: { text: '目标检测', color: 'blue' },
   classify: { text: '图像分类', color: 'purple' },
+  segment: { text: '实例分割', color: 'geekblue' },
+}
+
+interface ImportValues {
+  weights: string
+  data_yaml?: string
+  name?: string
+  task: string
+  classesText?: string
+  imgsz: number
+  batch: number
 }
 
 function bestMetric(m: ModelSummary): string {
@@ -33,10 +54,13 @@ function bestMetric(m: ModelSummary): string {
 /** 模型库列表（M5-08）。 */
 export default function ModelLibrary() {
   const navigate = useNavigate()
+  const [importForm] = Form.useForm<ImportValues>()
   const [models, setModels] = useState<ModelSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<string[]>([])
+  const [importOpen, setImportOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -63,6 +87,37 @@ export default function ModelLibrary() {
     navigate(`/models/compare?ids=${selected.map(encodeURIComponent).join(',')}`)
   }
 
+  const onImport = async (values: ImportValues) => {
+    if (!values.weights?.trim()) {
+      message.warning('请填写 .pt 权重路径')
+      return
+    }
+    setImporting(true)
+    try {
+      const res = await api.importModel({
+        weights: values.weights.trim(),
+        data_yaml: values.data_yaml?.trim() ?? '',
+        name: values.name?.trim() ?? '',
+        task: values.task,
+        classes: (values.classesText ?? '')
+          .split(/[,;|、\n\r\t]+/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+        imgsz: values.imgsz,
+        batch: values.batch,
+      })
+      message.success(`已导入：${res.model.name || res.model.model_id}`)
+      setImportOpen(false)
+      importForm.resetFields()
+      await load()
+      navigate(`/models/${encodeURIComponent(res.model.model_id)}`)
+    } catch (err: any) {
+      message.error(err.message ?? '导入失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   return (
     <div className="page">
       <Card
@@ -70,6 +125,9 @@ export default function ModelLibrary() {
         size="small"
         extra={
           <Space>
+            <Button size="small" icon={<ImportOutlined />} onClick={() => setImportOpen(true)}>
+              导入外部模型
+            </Button>
             <Button
               size="small"
               icon={<BarChartOutlined />}
@@ -87,12 +145,13 @@ export default function ModelLibrary() {
         <Paragraph type="secondary">
           训练成功会自动注册到模型库并触发评估。模型卡只记录权重路径与评估目录的
           <Text strong>引用</Text>，指标始终从评估结果文件读取，不会出现两处数据不一致。
+          非本项目的训练权重可用「导入外部模型」登记（目前仅支持 <Text code>.pt</Text>）。
         </Paragraph>
 
         {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
 
         {models.length === 0 && !loading ? (
-          <Empty description="还没有模型，训练完成后会自动注册；也可在训练列表点「注册」" />
+          <Empty description="还没有模型，训练完成后会自动注册；也可导入外部 .pt 权重" />
         ) : (
           <Table
             size="small"
@@ -111,9 +170,16 @@ export default function ModelLibrary() {
                 dataIndex: 'name',
                 render: (name: string, r) => (
                   <Space direction="vertical" size={0}>
-                    <a onClick={() => navigate(`/models/${encodeURIComponent(r.model_id)}`)}>
-                      <Text strong>{name || r.model_id}</Text>
-                    </a>
+                    <Space size={6}>
+                      <a onClick={() => navigate(`/models/${encodeURIComponent(r.model_id)}`)}>
+                        <Text strong>{name || r.model_id}</Text>
+                      </a>
+                      {r.source === 'external' && (
+                        <Tag color="orange" title="非本项目训练任务，由外部 .pt 权重导入">
+                          外部
+                        </Tag>
+                      )}
+                    </Space>
                     <Text type="secondary" className="mono" style={{ fontSize: 11 }}>
                       {r.model_id}
                     </Text>
@@ -133,15 +199,14 @@ export default function ModelLibrary() {
                 title: '类别',
                 dataIndex: 'num_classes',
                 width: 70,
-                render: (n: number, r) => (
-                  <span title={r.classes.join('、')}>{n}</span>
-                ),
+                render: (n: number, r) => <span title={r.classes.join('、')}>{n}</span>,
               },
               {
                 title: '数据集',
                 dataIndex: 'dataset_name',
                 width: 180,
-                render: (v: string) => v || <Text type="secondary">-</Text>,
+                render: (v: string, r) =>
+                  v || (r.has_data_yaml ? <Text type="secondary">-</Text> : <Text type="secondary">无</Text>),
               },
               {
                 title: '评估划分',
@@ -203,6 +268,70 @@ export default function ModelLibrary() {
           />
         )}
       </Card>
+
+      <Modal
+        open={importOpen}
+        title="导入外部模型"
+        okText="导入"
+        cancelText="取消"
+        confirmLoading={importing}
+        width={620}
+        onCancel={() => setImportOpen(false)}
+        onOk={() => importForm.submit()}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="只支持 .pt 权重"
+          description="导入后即可对它发起评估、对比与导出。评估需要配套的 data.yaml（带真值标签）；不填也能导入，但导入后无法评估（导出仍然可用）。"
+        />
+        <Form
+          form={importForm}
+          layout="vertical"
+          onFinish={onImport}
+          initialValues={{ task: 'detect', imgsz: 640, batch: 16 }}
+        >
+          <Form.Item
+            name="weights"
+            label=".pt 权重路径"
+            tooltip="服务器本机上的绝对路径；登记的是引用，请勿移动该文件"
+            rules={[{ required: true, message: '请填写权重路径' }]}
+          >
+            <Input placeholder="例如 D:\models\best.pt" allowClear />
+          </Form.Item>
+          <Form.Item
+            name="data_yaml"
+            label="数据集 data.yaml（可选，但评估需要）"
+            tooltip="指向带真值标注的数据集；类别会自动从其中的 names 读取"
+          >
+            <Input placeholder="例如 D:\datasets\mine\data.yaml" allowClear />
+          </Form.Item>
+          <Form.Item name="name" label="展示名（可选）">
+            <Input placeholder="默认用权重文件名" allowClear />
+          </Form.Item>
+          <Space size="large" wrap>
+            <Form.Item name="task" label="任务类型" style={{ minWidth: 150 }}>
+              <Select
+                options={[
+                  { value: 'detect', label: '目标检测' },
+                  { value: 'classify', label: '图像分类' },
+                  { value: 'segment', label: '实例分割' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="imgsz" label="imgsz" style={{ width: 120 }}>
+              <InputNumber style={{ width: '100%' }} min={32} max={1920} step={32} />
+            </Form.Item>
+            <Form.Item name="batch" label="batch" style={{ width: 120 }}>
+              <InputNumber style={{ width: '100%' }} min={1} max={512} />
+            </Form.Item>
+          </Space>
+          <Form.Item name="classesText" label="类别清单（可选，逗号分隔）">
+            <Input placeholder="留空则读取 data.yaml 的 names" allowClear />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }

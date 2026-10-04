@@ -140,6 +140,10 @@ yolo-studio/
   重型依赖只在训练子进程里 import（测试中用一个子进程断言保证这一点）。
 - **权重**：`.yaml` 结构文件表示从零训练（**离线可用**，不需要下载）；
   `.pt` 优先在 `YOLO_STUDIO_WEIGHTS` 目录按文件名查找，找不到才交给 ultralytics 下载。
+- **基础模型可自定义**：新建训练页的权重候选由 `GET /api/train/weights` 汇总——
+  内置结构文件/预训练权重、`YOLO_STUDIO_WEIGHTS` 目录里的文件、模型库已注册权重、历史训练产物；
+  也可用 `POST /api/train/weights` 上传自己的 `.pt`/`.yaml`（默认不覆盖同名文件，落盘算 sha256）。
+  候选里 `exists=false` 的预训练 `.pt` 会在首次训练时联网下载，界面对此有明确标注。
 
 训练任务的状态机：
 
@@ -155,6 +159,8 @@ pending → running → finished
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | GET | `/api/train/backends` | 训练后端与监控能力、默认配置 |
+| GET | `/api/train/weights` | 基础模型候选（内置结构文件/预训练、权重目录、模型库、历史训练产物） |
+| POST | `/api/train/weights` | 上传自定义基础模型权重（`.pt`/`.yaml`，默认不覆盖同名文件） |
 | POST | `/api/train/jobs` | 新建并启动训练 |
 | GET | `/api/train/jobs` | 任务列表 |
 | GET | `/api/train/jobs/{id}` | 详情（状态 + 指标 + 资源 + 日志尾部） |
@@ -199,6 +205,9 @@ storage/evals/<eval_id>/
   因此对比接口会检查划分是否一致并在结果里明确提示。
 - **模型卡不复制数据**：只记录权重路径与评估目录引用，
   避免「卡片里的指标」与「评估目录里的结果」两处不一致。
+- **外部模型可导入**（M3-05）：不属于本项目的训练权重，用 `POST /api/models/import`
+  登记进模型库（仅 `.pt`），之后即可评估、对比、导出。权重**只引用不复制**（同 R-26），
+  原文件移动/删除会导致该模型失效；评估需要配套 `data.yaml`，未提供时只能导出、不能评估。
 
 评估与模型库接口：
 
@@ -212,6 +221,7 @@ storage/evals/<eval_id>/
 | POST | `/api/eval/jobs/{id}/report` | 生成单文件 HTML 评估报告 |
 | WS | `/api/eval/jobs/{id}/ws` | 实时日志与状态 |
 | POST | `/api/models/register` | 把已完成的训练任务注册为模型 |
+| POST | `/api/models/import` | 导入外部 `.pt` 权重为模型（非训练任务，可评估/导出） |
 | GET | `/api/models` / `/{model_id}` | 模型列表 / 详情（含血缘与评估索引） |
 | GET | `/api/models/{model_id}/result` | 该模型某划分下最新评估结果 |
 | POST | `/api/models/{model_id}/eval` | 对该模型发起评估 |
@@ -413,6 +423,11 @@ dataset_card.json 的 prelabel 段（权重 / conf / iou / 模型类别 / 生成
 - 训练依赖（ultralytics / torch）声明在 `backend/requirements.txt`，随 venv 安装；
 - 所有路径基于项目内相对位置，可用环境变量覆盖；
 - 训练解释器默认当前解释器，用 `YOLO_STUDIO_PYTHON` 可指定其他环境。
+- **可远程/共享部署**：后端生产模式直接托管 `frontend/dist`，单端口同源访问
+  （`scripts/start-server.ps1`，默认 `0.0.0.0:8010`）。对外提供服务前必须设
+  `YOLO_STUDIO_ALLOWED_ROOTS`（默认不限制读取）——项目自身没有登录鉴权，请配合内网/VPN 或反代。
+  两端口开发模式用 `YOLO_STUDIO_CORS_ORIGINS` 放行来源；浏览器摄像头（实时验证）需要 HTTPS。
+  详见 `docs/getting-started.md`。
 
 ### 7. 出口只做一次归一化
 

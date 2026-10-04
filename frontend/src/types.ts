@@ -343,6 +343,7 @@ export interface SystemConfig {
   paths: ConfigPathInfo[]
   allowed_roots: string[]
   files_read_unrestricted: boolean
+  cors_origins?: string[]
   frontend_dist: string
   frontend_dist_exists: boolean
   optional_dependencies: OptionalDependency[]
@@ -467,6 +468,35 @@ export interface TrainBackendsResponse {
   }
 }
 
+/** 一个可作为训练基础模型的权重。 */
+export interface BaseWeightItem {
+  value: string
+  label: string
+  /** builtin | weights_dir | model_library | run */
+  source: string
+  /** 已知时的任务类型；为空表示不限 */
+  task: string
+  classes: string[]
+  /** structure（结构文件，从零训练）| pt（预训练权重） */
+  format: string
+  exists: boolean
+  size_bytes: number
+}
+
+export interface BaseWeightsResponse {
+  ok: boolean
+  weights: BaseWeightItem[]
+  weights_dir: string
+}
+
+export interface WeightUploadResponse {
+  ok: boolean
+  name: string
+  path: string
+  size_bytes: number
+  sha256: string
+}
+
 /** metrics 事件里的进度是结构体，status 事件里的 progress 是 0~1 的数字。 */
 export interface TrainProgress {
   epoch: number
@@ -571,6 +601,10 @@ export interface ModelSummary {
   classes: string[]
   dataset_name: string
   job_id: string
+  /** training = 训练任务注册；external = 外部权重导入 */
+  source?: string
+  /** 是否记录了 data.yaml（没有就无法评估） */
+  has_data_yaml?: boolean
   has_best: boolean
   best: Record<string, any>
   eval_splits: string[]

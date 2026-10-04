@@ -104,6 +104,11 @@ export default function ModelDetail() {
             <Tag color={card.task === 'classify' ? 'purple' : 'blue'}>
               {card.task === 'classify' ? '图像分类' : '目标检测'}
             </Tag>
+            {card.training?.source === 'external' && (
+              <Tag color="orange" title="由外部 .pt 权重导入，非本项目训练任务">
+                外部导入
+              </Tag>
+            )}
             <Tag>{card.classes.length} 类</Tag>
             <Tag>{card.evals.length} 次评估</Tag>
             <Tag>{card.deploys.length} 次导出</Tag>
@@ -126,7 +131,13 @@ export default function ModelDetail() {
               {card.model_id}
             </Text>
           </Descriptions.Item>
-          <Descriptions.Item label="训练任务">{card.training?.job_id ?? '-'}</Descriptions.Item>
+          <Descriptions.Item label="训练任务">
+            {card.training?.source === 'external' ? (
+              <Text type="secondary">外部导入（无训练任务）</Text>
+            ) : (
+              card.training?.job_id ?? '-'
+            )}
+          </Descriptions.Item>
           <Descriptions.Item label="best 权重">
             {card.weights?.best ? (
               <Text copyable className="mono" style={{ fontSize: 11 }}>
@@ -199,7 +210,13 @@ function OverviewPanel({ card }: { card: ModelCard }) {
             )}
           </Space>
         ) : (
-          <Empty description="训练记录里没有可展示的最优指标" />
+          <Empty
+            description={
+              card.training?.source === 'external'
+                ? '外部导入模型没有训练指标；请到「评估」页发起一次评估'
+                : '训练记录里没有可展示的最优指标'
+            }
+          />
         )}
       </Card>
 
@@ -303,6 +320,8 @@ function EvalPanel({
   const [split, setSplit] = useState('auto')
   const [starting, setStarting] = useState(false)
   const [job, setJob] = useState<EvalJob | null>(null)
+  // 没有 data.yaml 就无法评估（需要真值）；外部导入时常见
+  const canEval = Boolean((card.dataset ?? {}).data_yaml)
 
   const evalSplits = useMemo(
     () => Array.from(new Set(card.evals.map((e) => e.split).filter(Boolean))) as string[],
@@ -402,6 +421,15 @@ function EvalPanel({
   return (
     <>
       <Card title="发起评估" size="small">
+        {!canEval && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="该模型没有关联 data.yaml，无法评估"
+            description="评估需要带真值标注的数据集。请在导入外部模型时填写 data.yaml（或重新导入一次补上），再发起评估。"
+          />
+        )}
         <Space wrap>
           <Select
             style={{ width: 150 }}
@@ -418,13 +446,12 @@ function EvalPanel({
             type="primary"
             icon={<ExperimentOutlined />}
             loading={starting}
+            disabled={!canEval}
             onClick={startEval}
           >
             开始评估
           </Button>
-          <Text type="secondary">
-            评估跑在独立子进程，结果会自动挂到本模型卡片上
-          </Text>
+          <Text type="secondary">评估跑在独立子进程，结果会自动挂到本模型卡片上</Text>
         </Space>
 
         {job && (

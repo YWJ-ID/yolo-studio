@@ -309,17 +309,23 @@ uv pip install openvino             # OpenVINO
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe tests\test_ingest.py     # 接入层（49 断言）
-.\.venv\Scripts\python.exe tests\test_pipeline.py   # 划分 + 导出 + 合并（89 断言）
-.\.venv\Scripts\python.exe tests\test_clean.py      # 清洗引擎（58 断言）
-.\.venv\Scripts\python.exe tests\test_taxonomy.py   # 类别规范化（69 断言）
-.\.venv\Scripts\python.exe tests\test_adapters.py   # COCO / VOC / LabelMe（55 断言）
-.\.venv\Scripts\python.exe tests\test_analytics.py  # 统计分析与报告（84 断言）
-.\.venv\Scripts\python.exe tests\test_train.py      # 训练模块（142 断言）
-.\.venv\Scripts\python.exe tests\test_eval.py       # 评估与模型库（147 断言）
-.\.venv\Scripts\python.exe tests\test_deploy.py     # 部署导出（103 断言）
+.\.venv\Scripts\python.exe tests\test_ingest.py     # 63  接入层（含 /api/datasets/browse）
+.\.venv\Scripts\python.exe tests\test_pipeline.py   # 89  划分 + 导出 + 多源合并
+.\.venv\Scripts\python.exe tests\test_clean.py      # 58  清洗引擎
+.\.venv\Scripts\python.exe tests\test_taxonomy.py   # 69  类别规范化
+.\.venv\Scripts\python.exe tests\test_adapters.py   # 55  COCO / VOC / LabelMe
+.\.venv\Scripts\python.exe tests\test_analytics.py  # 84  统计分析
+.\.venv\Scripts\python.exe tests\test_train.py      # 142 训练模块（调度/指标/日志/资源/产物/API/WS）
+.\.venv\Scripts\python.exe tests\test_eval.py       # 174 评估与模型库（归一化/报告/注册/外部导入/对比/API）
+.\.venv\Scripts\python.exe tests\test_deploy.py     # 103 部署导出（格式探测/哈希校验/生命周期/API/联动）
+.\.venv\Scripts\python.exe tests\test_infer.py      # 97  M6 实时验证（格式/归一化/会话/协议/API/背压）
+.\.venv\Scripts\python.exe tests\test_prelabel.py   # 97  M7 预标注（收集/IR/统计/失败跳过/分类/血缘/导出卡片）
 ```
 
+> 全量共 **1031 断言**（11 个文件）。`test_train` 存在一个**环境相关的偶发失败**
+> （约 1/8~1/12，全量连跑时更高，`wait_terminal` 25s 超时；见 `PROGRESS.md` R-47），
+> 与功能无关，偶发时重跑即可。
+>
 > Windows 控制台是 GBK，个别测试输出含 `²` 会抛 `UnicodeEncodeError`。
 > 先设 `$env:PYTHONIOENCODING='utf-8'; $env:PYTHONUTF8='1'` 再跑即可（不是测试失败）。
 
@@ -334,6 +340,82 @@ cd backend
 
 训练模块测试用 `fixtures/fake_trainer.py` 模拟 ultralytics 的外部产物（results.csv /
 日志 / 过程图），因此不需要真跑 YOLO 就能验证调度、指标、日志与产物接口。
+
+---
+
+## 五、部署到另一台机器 / 局域网共享（含 GPU 机器）
+
+目标场景：**后端 + 前端跑在一台（有 GPU 的）机器上，你从另一台机器用浏览器访问**。
+这本来就是本项目支持的标准用法——后端在生产模式下会直接托管前端。
+
+### 推荐：单端口生产模式（最省事）
+
+在**服务器那台机器**上：
+
+```powershell
+# 1) 前端先构建一次（产物 frontend/dist 会被后端托管）
+cd frontend; npm run build
+
+# 2) 启动后端（监听所有网卡，不带热重载）
+powershell -ExecutionPolicy Bypass -File scripts\start-server.ps1
+#    等价于： cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8010
+```
+
+然后在客户端浏览器访问 `http://<服务器IP>:8010/`。
+
+**为什么推荐**：前端与 API 同源 —— 没有 CORS 问题，WebSocket 自动走同源，
+`/train/:id` 这类深链刷新也正常，图片/文件接口同源。`scripts/start-server.ps1` 默认
+`-BindHost 0.0.0.0 -Port 8010`，可传参覆盖。
+
+### 开发模式两端口（Vite 5173 + 后端 8010）
+
+```powershell
+powershell -File scripts\start-backend.ps1 -BindHost 0.0.0.0
+powershell -File scripts\start-frontend.ps1 -BindHost 0.0.0.0
+```
+
+这种模式用 `http://<服务器IP>:5173` 访问前端，浏览器 Origin 是 `http://<服务器IP>:5173`，
+**必须在后端放行它**，否则请求被 CORS 拦下：
+
+```powershell
+$env:YOLO_STUDIO_CORS_ORIGINS = "http://192.168.1.20:5173"   # 分号或逗号分隔；重启后端生效
+```
+
+> **Vite 的主机校验**（`server.allowedHosts`，5.4.12+ 的安全补丁）：用 **IP** 访问前端默认就放行；
+> 但用**主机名/域名**访问（如 `http://my-pc:5173`、隧道域名）会返回 `403 Blocked request. This host
+> ("my-pc") is not allowed.`。此时用 `VITE_ALLOWED_HOSTS` 放行（会读取 `frontend/.env.local`）：
+>
+> ```powershell
+> $env:VITE_ALLOWED_HOSTS = "my-pc,my-pc.lan"    # 逗号分隔；重启前端 dev server 生效
+> # 特殊值 true / all / * = 放行任意主机（关闭该防护，仅限可信内网）
+> ```
+
+
+### 必做的几件事
+
+| 项 | 说明 |
+|---|---|
+| 监听地址 | 后端 `--host 0.0.0.0`（`start-server.ps1` 已默认） |
+| 防火墙 | Windows Defender 防火墙放行 8010/TCP |
+| **读取白名单** | `YOLO_STUDIO_ALLOWED_ROOTS="D:\datasets;D:\models"`。默认**空 = 不限制**，任何人都能读服务器上任意文件 |
+| **认证** | 本项目**没有登录/鉴权**。只在内网/VPN 用，或在前面套反代（Nginx/Caddy）做 Basic Auth |
+| CORS | 仅两端口开发模式需要（见上）；单端口同源不需要 |
+
+### 摄像头（实时验证）需要 HTTPS
+
+浏览器要求 `getUserMedia` 运行在**安全上下文**（HTTPS 或 `localhost`）。用
+`http://<服务器IP>:8010` 访问时，**实时验证页的摄像头会被浏览器禁用**；图片上传/服务器路径推理
+以及预标注、训练、评估、导出、模型库等全部不受影响。想远端用摄像头就配 HTTPS
+（自签证书 / 反代终止 TLS / 隧道）。
+注意摄像头用的是**你本地浏览器**的摄像头，服务器机器不需要摄像头。
+
+### 环境与数据
+
+- 服务器上装 **CUDA 版 torch**（见「训练环境」），`YOLO_STUDIO_DEVICE=auto` 会自动用 GPU；
+  可选装 `pynvml` 才有 GPU 利用率面板。
+- 血缘/路径都是写在 JSON 里的**绝对路径**。把别处的 `storage/` 直接拷过来会因盘符/路径不同而失效：
+  建议在服务器上重新接入数据，或用 `YOLO_STUDIO_*` 把各目录指到实际位置后重新注册。
+- 关掉浏览器不影响训练/评估（服务端子进程）；但**后端进程要常驻**，重启后能接管仍在跑的进程。
 
 ---
 
@@ -393,8 +475,10 @@ uv pip install -r requirements.txt
 | `YOLO_STUDIO_AUTO_EVAL_SPLIT` | `auto` | 自动评估的划分：`auto`/`val`/`test`/`train` |
 | `YOLO_STUDIO_WEIGHTS` | `backend/storage/weights` | 预训练权重目录（按文件名引用 `.pt`） |
 | `YOLO_STUDIO_UPLOADS` | `backend/storage/uploads` | 上传的原始数据 |
-| `YOLO_STUDIO_DB` | `backend/storage/studio.db` | sqlite 元数据库 |
+| `YOLO_STUDIO_REPORTS` | `backend/storage/reports` | 质量报告输出目录 |
+| `YOLO_STUDIO_DB` | `backend/storage/studio.db` | **保留字段，当前未使用**（本项目用文件系统而非数据库，见 README 决策 R-10） |
 | `YOLO_STUDIO_PORT` | `8010` | API 监听端口（避免与 8000 的 LLM 网关冲突） |
+| `YOLO_STUDIO_CORS_ORIGINS` | `http://localhost:5173;http://127.0.0.1:5173` | CORS 允许来源（分号或逗号分隔）。从别的机器/域名访问时把它加进来；同源单端口部署无需配置 |
 | `YOLO_STUDIO_PYTHON` | 当前解释器 | 训练使用的解释器 |
 | `YOLO_STUDIO_DEVICE` | `auto` | 训练设备：`auto` / `cpu` / `cuda:0` |
-| `YOLO_STUDIO_ALLOWED_ROOTS` | 空（不限制） | 图片读取白名单，分号分隔。**对外提供服务时必须设置** |
+| `YOLO_STUDIO_ALLOWED_ROOTS` | 空（不限制） | 图片/文件读取白名单，分号分隔。**对外提供服务时必须设置** |

@@ -11,30 +11,38 @@ WebSocket 是异步的，因此这里用 `loop.call_soon_threadsafe` 把
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from core.train import (
+    MAX_WEIGHT_BYTES,
     JobNotFound,
     JobStateError,
     TASKS,
     TrainSpec,
     TrainingManager,
+    candidate_weights,
+    normalize_weight_filename,
     resolve_device,
 )
 
 from ...config import settings
 from ...schemas import (
+    BaseWeightItem,
+    BaseWeightsResponse,
     TrainBackendInfo,
     TrainBackendsResponse,
     TrainJobResponse,
     TrainJobsResponse,
     TrainRequest,
+    WeightUploadResponse,
 )
-from ...services import get_training_manager
+from ...services import get_registry, get_training_manager
 
 router = APIRouter(prefix="/api/train", tags=["train"])
 
@@ -77,6 +85,94 @@ def list_backends() -> TrainBackendsResponse:
             "tasks": list(TASKS),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# 基础模型（权重）：候选发现与上传
+# ---------------------------------------------------------------------------
+
+
+@router.get("/weights", response_model=BaseWeightsResponse)
+def list_base_weights() -> BaseWeightsResponse:
+    """列出可作为训练基础模型的权重。
+
+    来源：内置结构文件/预训练权重、`YOLO_STUDIO_WEIGHTS` 目录、模型库、历史训练产物。
+    只列出「方便选项」，用户仍可在新建训练里手填任意绝对路径。
+    """
+    manager = get_manager()
+    weights_dir = Path(manager.weights_dir or settings.weights_dir)
+    try:
+        cards = get_registry().list()
+    except Exception:
+        # 模型库读不到不应影响其它来源的列举
+        cards = []
+    items = candidate_weights(weights_dir=weights_dir, runs_dir=manager.runs_dir, cards=cards)
+    return BaseWeightsResponse(weights=[BaseWeightItem(**it) for it in items], weights_dir=str(weights_dir))
+
+
+@router.post("/weights", response_model=WeightUploadResponse)
+def upload_base_weight(
+    file: UploadFile = File(..., description="基础模型权重文件（.pt / .yaml / .yml）"),
+    overwrite: bool = Query(False, description="同名文件已存在时是否覆盖"),
+) -> WeightUploadResponse:
+    """上传一个基础模型权重到权重目录，之后即可在训练里按文件名引用。
+
+    与其它产物一致：默认**不**静默覆盖同名文件，需显式 `overwrite=true`；
+    边写边算 sha256，落盘采用 `.part` 临时文件 + 原子替换，避免半截文件被当成有效权重。
+    """
+    try:
+        name = normalize_weight_filename(file.filename or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    weights_dir = Path(get_manager().weights_dir or settings.weights_dir)
+    weights_dir.mkdir(parents=True, exist_ok=True)
+    dest = weights_dir / name
+
+    if dest.exists() and not overwrite:
+        raise HTTPException(
+            status_code=409,
+            detail=f"权重已存在: {name}（确认覆盖请带 overwrite=true）",
+        )
+
+    digest = hashlib.sha256()
+    size = 0
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        with open(tmp, "wb") as out:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_WEIGHT_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"权重超过上限 {MAX_WEIGHT_BYTES // (1024 ** 2)} MB",
+                    )
+                digest.update(chunk)
+                out.write(chunk)
+        os.replace(tmp, dest)
+    except HTTPException:
+        _unlink(tmp)
+        raise
+    except Exception as exc:
+        _unlink(tmp)
+        raise HTTPException(status_code=500, detail=f"保存权重失败: {exc}") from exc
+    finally:
+        try:
+            file.file.close()
+        except Exception:
+            pass
+
+    return WeightUploadResponse(name=name, path=str(dest.resolve()), size_bytes=size, sha256=digest.hexdigest())
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------

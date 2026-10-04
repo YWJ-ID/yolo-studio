@@ -86,6 +86,7 @@ def config() -> Dict[str, Any]:
         "paths": paths,
         "allowed_roots": [str(p) for p in settings.allowed_roots],
         "files_read_unrestricted": not settings.allowed_roots,
+        "cors_origins": list(settings.cors_origins),
         "frontend_dist": str(settings.frontend_dist),
         "frontend_dist_exists": settings.frontend_dist.is_dir(),
         "optional_dependencies": [

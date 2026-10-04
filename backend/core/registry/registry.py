@@ -11,12 +11,22 @@
 
 from __future__ import annotations
 
+import re
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from .model_card import CARD_FILE, ModelCard, now_iso, touch
 
 # 数据集卡片文件名（由 core.export 写出）
 DATASET_CARD = "dataset_card.json"
+
+# 外部导入支持的任务类型（与训练模块保持一致）
+EXTERNAL_TASKS = ("detect", "classify", "segment")
+
+
+def _slug(text: str, max_len: int = 40) -> str:
+    return re.sub(r"[^0-9A-Za-z_\-]+", "_", str(text or ""))[:max_len].strip("_")
 
 
 def _names_from_yaml(data_yaml: str) -> List[str]:
@@ -164,6 +174,103 @@ class ModelRegistry:
         touch(card)
         card.save(self._dir(model_id))
         return card
+
+    def register_external(
+        self,
+        weights,
+        data_yaml: str = "",
+        name: str = "",
+        task: str = "detect",
+        classes: Optional[List[str]] = None,
+        imgsz: int = 640,
+        batch: int = 16,
+        model_id: str = "",
+    ) -> ModelCard:
+        """把一个**外部权重**（非本项目的训练任务）登记进模型库。
+
+        现阶段只支持 `.pt`：评估走 ultralytics 的 val、导出也有完整链路，
+        其它格式（ONNX / TorchScript 等）只能推理不能评估，登记进来会误导用户。
+
+        与训练注册的区别：没有 run_dir，权重直接引用外部文件路径；
+        `training.source = "external"` 用于界面区分。评估需要配套的 `data.yaml`
+        （没有真值就算不出指标），因此建议导入时一并提供。
+        """
+        weights_path = Path(weights).expanduser().resolve()
+        if not weights_path.is_file():
+            raise ValueError(f"权重文件不存在: {weights}")
+        if weights_path.suffix.lower() != ".pt":
+            suffix = weights_path.suffix or "（无扩展名）"
+            raise ValueError(f"目前只支持导入 .pt 权重（评估与导出需要），收到 {suffix}")
+
+        data_yaml_path = ""
+        if data_yaml:
+            resolved = Path(data_yaml).expanduser().resolve()
+            if not resolved.is_file():
+                raise ValueError(f"data.yaml 不存在: {data_yaml}")
+            data_yaml_path = str(resolved)
+
+        if task not in EXTERNAL_TASKS:
+            raise ValueError(f"未知任务类型: {task}，可选 {EXTERNAL_TASKS}")
+
+        # 同一个权重文件不重复登记（避免导入两次出现两张卡片）
+        existing = self._find_by_weight(weights_path)
+        if existing is not None:
+            return existing
+
+        if model_id:
+            model_id = _slug(model_id, max_len=64)
+            if not model_id:
+                raise ValueError("model_id 只能是字母 / 数字 / 下划线 / 连字符")
+            if self.get(model_id) is not None:
+                raise ValueError(f"模型 id 已存在: {model_id}")
+        else:
+            model_id = self._new_external_id(name or weights_path.stem)
+
+        card = ModelCard(
+            model_id=model_id,
+            name=str(name or weights_path.stem),
+            task=task,
+            created_at=now_iso(),
+        )
+        card.weights = {"best": str(weights_path)}
+        card.training = {
+            "source": "external",
+            "job_id": "",
+            "run_dir": "",
+            "weights_source": str(weights_path),
+            "imgsz": int(imgsz),
+            "batch": int(batch),
+        }
+        if data_yaml_path:
+            card.dataset = _dataset_info(data_yaml_path)
+        card.classes = [str(c) for c in (classes or [])] or list(
+            (card.dataset or {}).get("classes") or []
+        )
+        card.notes.append("由外部权重导入（非训练任务）；评估需要配套的 data.yaml")
+        touch(card)
+        card.save(self._dir(model_id))
+        return card
+
+    def _find_by_weight(self, weights_path: Path) -> Optional[ModelCard]:
+        target = str(weights_path).lower()
+        for card in self.list():
+            existing = (card.weights or {}).get("best")
+            if not existing:
+                continue
+            try:
+                if str(Path(existing).resolve()).lower() == target:
+                    return card
+            except Exception:
+                continue
+        return None
+
+    def _new_external_id(self, stem: str) -> str:
+        slug = _slug(stem) or "model"
+        base = f"ext_{slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        model_id = base
+        while self.get(model_id) is not None:
+            model_id = f"{base}_{uuid.uuid4().hex[:4]}"
+        return model_id
 
     def attach_eval(self, model_id: str, eval_job, result) -> Optional[ModelCard]:
         """把一次评估结果挂到模型卡片上（同一 eval_id 重复挂载则覆盖）。"""

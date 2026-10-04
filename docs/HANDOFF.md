@@ -12,13 +12,13 @@
 | M0 项目骨架 | 5/5 | 完成 |
 | M1 数据模块 | 12/12 | 完成 |
 | M2 训练模块 | 7/7 | 完成 |
-| M3 评估与模型库 | 4/4 | 完成 |
+| M3 评估与模型库 | 5/5 | 完成（含 M3-05 导入外部模型） |
 | **M4 部署导出** | **3/3** | **完成** |
 | M5 前端界面 | **11/11** | **完成**（含 M5-09 路由级分割、M5-10 ECharts 按需引入、M5-11 设置页） |
 | M6 实时验证 | **8/8** | **完成**（含前端页面，已真实浏览器验证） |
 | M7 预标注 | **3/3** | **完成**（core / API / 前端向导 / CLI / 测试 / 血缘） |
 
-**测试现状：1004 断言**（11 个测试文件，见第四节）。其余 10 个文件（含 `test_prelabel` 97）**稳定全绿**；
+**测试现状：1031 断言**（11 个测试文件，见第四节）。其余 10 个文件（含 `test_prelabel` 97）**稳定全绿**；
 `test_train.py` 存在一个**环境相关的偶发失败**（单跑约 1/8~1/12，全量连跑约 1/3，**与 M7 无关**，见 R-47）——
 它会让「全量一次跑绿」变成概率事件，别据此怀疑自己刚改的东西。
 
@@ -69,7 +69,15 @@
 | 后端端口 | **8010**（8000 被本机 LLM 网关占用） |
 | 已装依赖 | ultralytics 8.4.160 + torch 2.8.0（**CPU 版，无 CUDA**）；psutil 7.2.2；pynvml 已装但无 NVIDIA 设备 |
 | 前端 | React 18 + Ant Design 5 + Vite + ECharts，端口 5173 |
-| 启动 | `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1` |
+| 启动（开发） | `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1` |
+| 启动（共享/远程） | `scripts\start-server.ps1`（单端口托管前端，默认 `0.0.0.0:8010`，无热重载） |
+
+**要让别的机器访问**（GPU 机器部署的常见用法）：用 `scripts\start-server.ps1`（前端由后端同源托管，
+无 CORS 问题），并注意三件事：① 防火墙放行 8010；② 设 `YOLO_STUDIO_ALLOWED_ROOTS`
+（默认**空 = 不限制**，任何人都能读服务器上任意文件）；③ 本项目**没有登录鉴权**，只在内网/VPN 用。
+两端口开发模式需用 `YOLO_STUDIO_CORS_ORIGINS` 放行访问来源；用**主机名/域名**访问 Vite dev server
+还需 `VITE_ALLOWED_HOSTS`（`server.allowedHosts`，IP 访问默认已放行）；实时验证的**摄像头**需要 HTTPS
+（浏览器安全上下文要求）。详见 `docs/getting-started.md` 第五节。
 
 **本机无 CUDA** → 训练以 CPU 运行；可视化在无 GPU 时降级为仅 CPU 面板（已实现，见 M2-05）。
 
@@ -163,7 +171,7 @@ cd backend
 .\.venv\Scripts\python.exe tests\test_adapters.py    # 55  COCO / VOC / LabelMe
 .\.venv\Scripts\python.exe tests\test_analytics.py   # 84  统计分析
 .\.venv\Scripts\python.exe tests\test_train.py       # 142 训练模块（调度/指标/日志/资源/产物/API/WS）
-.\.venv\Scripts\python.exe tests\test_eval.py        # 147 评估与模型库（结果归一化/报告/注册/对比/API）
+.\.venv\Scripts\python.exe tests\test_eval.py        # 174 评估与模型库（结果归一化/报告/注册/外部导入/对比/API）
 .\.venv\Scripts\python.exe tests\test_deploy.py      # 103 部署导出（格式探测/哈希校验/生命周期/API/联动）
 .\.venv\Scripts\python.exe tests\test_infer.py       # 97  M6 实时验证（格式/归一化/会话/协议/API/背压/类名来源）
 .\.venv\Scripts\python.exe tests\test_prelabel.py    # 97  M7 预标注（收集/IR/统计/失败跳过/分类/血缘/导出卡片/API）
@@ -242,9 +250,9 @@ cd backend
 - PROGRESS.md（进度、已决策事项、风险项）
 - README.md（架构与设计决策）
 
-M0~M7 已完成：M1 数据模块（12/12）、M2 训练（7/7）、M3 评估与模型库（4/4）、
+M0~M7 已完成：M1 数据模块（12/12）、M2 训练（7/7）、M3 评估与模型库（5/5，含导入外部模型）、
 M4 部署导出（3/3）、M5 前端界面（11/11）、M6 实时验证（8/8）、M7 预标注（3/3）。
-测试 1004 断言（11 个文件；`test_train` 有环境相关偶发，见 R-47），前端 `npm run build` 通过。
+测试 1031 断言（11 个文件；`test_train` 有环境相关偶发，见 R-47），前端 `npm run build` 通过。
 
 后续可做的事（按需选择，先读 PROGRESS.md 风险表）：
 - M6 视频模式的逐帧送检（当前有意未做）；
@@ -335,11 +343,11 @@ core/eval/
 └── compare.py           多模型对比（同划分校验、缺失留空）
 core/registry/
 ├── model_card.py        ModelCard（model_card.json）
-└── registry.py          ModelRegistry：注册 / 挂评估 / 数据集血缘反查
+└── registry.py          ModelRegistry：训练注册 / 外部导入 / 挂评估 / 数据集血缘反查
 core/process.py          pid_alive / kill_tree（训练与评估共用）
 app/services.py          训练/评估/模型库三个单例 + 「训练完成 → 注册 + 自动评估」「评估完成 → 挂卡片」联动
 app/api/routes/eval.py   /api/eval/*
-app/api/routes/models.py /api/models/*
+app/api/routes/models.py /api/models/*（含 POST /api/models/import 导入外部 .pt）
 ```
 
 存储布局：
@@ -347,7 +355,18 @@ app/api/routes/models.py /api/models/*
 ```
 storage/evals/<eval_id>/     eval_spec.json / eval_result.json / eval.log + ultralytics 过程图
 storage/models/<job_id>/     model_card.json（模型 id 就是训练任务 id）
+storage/models/<ext_...>/    外部导入模型：model_card.json（training.source = "external"，无 run_dir）
 ```
+
+### M3-05 导入外部模型（.pt）
+
+- 入口：`core/registry/registry.py::register_external()` + `POST /api/models/import`；
+  前端在模型库页「导入外部模型」弹窗，列表/详情显示「外部导入」标记。
+- **只支持 `.pt`**：评估走 ultralytics val、导出有完整链路；ONNX/TorchScript 无法 val，不要放进来。
+- **权重只引用不复制**（R-48）：记的是原路径，原文件移动/删除即失效。
+- `data.yaml` 可选：不提供时卡片仍可导入，但**评估会被拒**（界面禁用「开始评估」并说明）。
+- 同一权重文件重复导入 → 返回同一卡片（按 resolved 路径去重）。
+- `training.source` 默认 `"training"`，旧卡片无需迁移。
 
 ### M3 的两个坑
 

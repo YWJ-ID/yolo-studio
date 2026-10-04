@@ -289,6 +289,33 @@ class TrainBackendsResponse(BaseModel):
     defaults: Dict[str, Any] = Field(default_factory=dict)
 
 
+class BaseWeightItem(BaseModel):
+    """一个可作为训练基础模型的权重。"""
+
+    value: str = Field(..., description="写入 TrainSpec.weights 的取值（名字或绝对路径）")
+    label: str
+    source: str = Field("builtin", description="builtin | weights_dir | model_library | run")
+    task: str = Field("", description="已知时的任务类型；为空表示不限")
+    classes: List[str] = Field(default_factory=list)
+    format: str = Field("", description="structure（结构文件，从零训练）| pt（预训练权重）")
+    exists: bool = Field(True, description="本地是否已存在；内置 .pt 为 False 时会联网下载")
+    size_bytes: int = 0
+
+
+class BaseWeightsResponse(BaseModel):
+    ok: bool = True
+    weights: List[BaseWeightItem] = Field(default_factory=list)
+    weights_dir: str = ""
+
+
+class WeightUploadResponse(BaseModel):
+    ok: bool = True
+    name: str
+    path: str
+    size_bytes: int
+    sha256: str = ""
+
+
 # ---------------------------------------------------------------------------
 # 评估（M3-01 / M3-02）
 # ---------------------------------------------------------------------------
@@ -376,6 +403,8 @@ class ModelSummary(BaseModel):
     classes: List[str] = Field(default_factory=list)
     dataset_name: str = ""
     job_id: str = ""
+    source: str = Field("training", description="training = 训练任务注册；external = 外部权重导入")
+    has_data_yaml: bool = Field(False, description="是否记录了 data.yaml（没有就无法评估）")
     has_best: bool = False
     best: Dict[str, Any] = Field(default_factory=dict)
     eval_splits: List[str] = Field(default_factory=list)
@@ -418,6 +447,23 @@ class ModelRegisterRequest(BaseModel):
     """把一次已完成的训练任务注册为模型。"""
 
     job_id: str = Field(..., description="训练任务 id（训练目录名）")
+
+
+class ModelImportRequest(BaseModel):
+    """导入一个外部权重（非本项目训练任务）。
+
+    现阶段只支持 `.pt`：评估走 ultralytics val、导出有完整链路。
+    `data_yaml` 用于评估（需要真值），不提供则导入后只能导出、不能评估。
+    """
+
+    weights: str = Field(..., description="外部 .pt 权重路径")
+    data_yaml: str = Field("", description="配套数据集 data.yaml；评估需要")
+    name: str = Field("", description="展示名，默认用权重文件名")
+    task: str = Field("detect", description="detect | classify | segment")
+    classes: List[str] = Field(default_factory=list, description="类别清单；留空取 data.yaml 的 names")
+    imgsz: int = 640
+    batch: int = 16
+    model_id: str = Field("", description="显式指定模型 id（默认自动生成 ext_...）")
 
 
 # ---------------------------------------------------------------------------

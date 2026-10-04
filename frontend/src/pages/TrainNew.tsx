@@ -9,32 +9,47 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Row,
   Select,
   Space,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd'
-import { ArrowLeftOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, PlayCircleOutlined, UploadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import type { DatasetVersion, EnvResponse, TrainBackendsResponse } from '../types'
+import type { BaseWeightItem, DatasetVersion, EnvResponse, TrainBackendsResponse } from '../types'
 
 const { Text, Paragraph } = Typography
 
+/**
+ * 内置候选：接口暂时不可用时的兜底。正常情况下候选来自
+ * `GET /api/train/weights`（含权重目录、模型库、历史训练产物，并可上传）。
+ */
 const WEIGHTS_BY_TASK: Record<string, { value: string; label: string }[]> = {
   detect: [
     { value: 'yolo11n.yaml', label: 'yolo11n.yaml（结构文件，从零训练）' },
     { value: 'yolo11s.yaml', label: 'yolo11s.yaml' },
     { value: 'yolo11m.yaml', label: 'yolo11m.yaml' },
-    { value: 'yolo11n.pt', label: 'yolo11n.pt（预训练权重）' },
+    { value: 'yolo11n.pt', label: 'yolo11n.pt（预训练权重，需联网下载）' },
   ],
   classify: [
     { value: 'yolo11-cls.yaml', label: 'yolo11-cls.yaml（结构文件，从零训练）' },
-    { value: 'yolo11n-cls.pt', label: 'yolo11n-cls.pt（预训练权重）' },
+    { value: 'yolo11n-cls.pt', label: 'yolo11n-cls.pt（预训练权重，需联网下载）' },
   ],
 }
+
+/** 候选权重的来源排序：内置在前，历史产物在后。 */
+const WEIGHT_SOURCE_ORDER: Record<string, number> = {
+  builtin: 0,
+  weights_dir: 1,
+  model_library: 2,
+  run: 3,
+}
+
 
 /** 新建训练（M5-07 的新建部分）。 */
 export default function TrainNew() {
@@ -43,15 +58,23 @@ export default function TrainNew() {
   const [env, setEnv] = useState<EnvResponse | null>(null)
   const [backends, setBackends] = useState<TrainBackendsResponse | null>(null)
   const [versions, setVersions] = useState<DatasetVersion[]>([])
+  const [weights, setWeights] = useState<BaseWeightItem[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [task, setTask] = useState('detect')
 
   useEffect(() => {
-    Promise.all([api.env(), api.trainBackends(), api.versions()])
-      .then(([e, b, v]) => {
+    Promise.all([
+      api.env(),
+      api.trainBackends(),
+      api.versions(),
+      api.trainWeights().catch(() => null),
+    ])
+      .then(([e, b, v, w]) => {
         setEnv(e)
         setBackends(b)
         setVersions(v)
+        setWeights(w?.weights ?? [])
         form.setFieldsValue({
           device: b.defaults.device || 'cpu',
           task: 'detect',
@@ -65,6 +88,41 @@ export default function TrainNew() {
     value: `${v.path}\\data.yaml`,
     label: `${v.name}（${v.task}，train ${v.images?.train ?? 0} / val ${v.images?.val ?? 0} / test ${v.images?.test ?? 0}）`,
   }))
+
+  // 候选按任务类型过滤（task 为空的候选不限任务）；接口不可用时退回内置候选
+  const available = weights.filter((w) => !w.task || w.task === task)
+  const weightOptions = available.length
+    ? available
+        .slice()
+        .sort((a, b) => (WEIGHT_SOURCE_ORDER[a.source] ?? 9) - (WEIGHT_SOURCE_ORDER[b.source] ?? 9))
+        .map((w) => ({ value: w.value, label: w.label }))
+    : WEIGHTS_BY_TASK[task] ?? WEIGHTS_BY_TASK.detect
+
+  const doUpload = async (file: File, overwrite: boolean) => {
+    setUploading(true)
+    try {
+      const res = await api.uploadTrainWeight(file, overwrite)
+      message.success(`已上传 ${res.name}（${(res.size_bytes / 1024 / 1024).toFixed(1)} MB）`)
+      form.setFieldValue('weights', res.path)
+      const list = await api.trainWeights().catch(() => null)
+      if (list) setWeights(list.weights)
+    } catch (err: any) {
+      const msg = String(err?.message ?? '上传失败')
+      if (!overwrite && msg.includes('已存在')) {
+        Modal.confirm({
+          title: '权重已存在',
+          content: `${file.name} 已存在于权重目录，是否覆盖？`,
+          okText: '覆盖',
+          cancelText: '取消',
+          onOk: () => doUpload(file, true),
+        })
+      } else {
+        message.error(msg)
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const onSubmit = async (values: any) => {
     if (!values.data_yaml?.trim()) {
@@ -175,15 +233,33 @@ export default function TrainNew() {
             <Col xs={24} lg={14}>
               <Form.Item
                 name="weights"
-                label="权重"
-                tooltip=".yaml 表示从结构文件从零训练（离线可用，不需下载）；.pt 为预训练权重。留空按任务取默认 .yaml"
+                label="基础模型（权重）"
+                tooltip=".yaml 结构文件从零训练（离线、不下载）；.pt 为预训练权重。可选权重目录 / 模型库 / 历史训练产物，或上传自定义权重；留空按任务取默认 .yaml"
               >
                 <AutoComplete
-                  options={WEIGHTS_BY_TASK[task] ?? WEIGHTS_BY_TASK.detect}
+                  options={weightOptions}
                   placeholder={task === 'classify' ? '留空 = yolo11-cls.yaml' : '留空 = yolo11n.yaml'}
                   allowClear
                 />
               </Form.Item>
+              <Space size={8} style={{ marginTop: -12, marginBottom: 12 }}>
+                <Upload
+                  accept=".pt,.yaml,.yml"
+                  showUploadList={false}
+                  beforeUpload={(file) => {
+                    doUpload(file as unknown as File, false)
+                    return false
+                  }}
+                  disabled={uploading}
+                >
+                  <Button size="small" icon={<UploadOutlined />} loading={uploading}>
+                    上传自定义权重
+                  </Button>
+                </Upload>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  支持 .pt / .yaml，上传到权重目录后即可选择
+                </Text>
+              </Space>
             </Col>
             <Col xs={24} lg={10}>
               <Form.Item name="device" label="训练设备" tooltip="cpu | cuda:0；本机无 GPU 时保持 cpu">

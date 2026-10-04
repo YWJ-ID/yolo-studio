@@ -929,6 +929,153 @@ def test_models_api(tmp: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_register_external(tmp: Path) -> None:
+    print("\n== 导入外部模型（.pt） ==")
+    from fastapi import HTTPException
+
+    from app.api.routes import models as models_route
+    from app.schemas import ModelImportRequest, ModelEvalRequest
+    from core.registry import ModelRegistry
+
+    from app import services
+
+    data_yaml = make_workspace(tmp)
+    ext_dir = tmp / "external"
+    ext_dir.mkdir(parents=True, exist_ok=True)
+    ext_weights = ext_dir / "my_best.pt"
+    ext_weights.write_bytes(b"fake-pt")
+
+    registry = ModelRegistry(tmp / "models")
+    models_route.set_registry(registry)
+    try:
+        card = registry.register_external(
+            weights=str(ext_weights),
+            data_yaml=str(data_yaml),
+            name="我的外部模型",
+            task="detect",
+            imgsz=320,
+            batch=4,
+        )
+        check(card.model_id.startswith("ext_"), f"自动生成 ext_ 前缀 id: {card.model_id}")
+        eq(card.name, "我的外部模型", "使用展示名")
+        eq(card.weights.get("best"), str(ext_weights.resolve()), "记录外部权重路径")
+        eq(card.training.get("source"), "external", "标记来源为外部")
+        eq(card.training.get("run_dir"), "", "外部模型没有训练目录")
+        eq(card.classes, ["square", "circle"], "类别取自 data.yaml 的 names")
+        eq(card.dataset.get("data_yaml"), str(data_yaml.resolve()), "记录 data.yaml 绝对路径")
+        check(any("外部" in n for n in card.notes), "备注说明是外部导入")
+
+        summary = card.summary()
+        eq(summary["source"], "external", "摘要标记来源为外部")
+        eq(summary["has_data_yaml"], True, "摘要标明有 data.yaml")
+        eq(summary["job_id"], "", "外部模型没有训练任务 id")
+
+        # 同一权重文件重复导入 → 返回同一张卡片，不产生第二张
+        again = registry.register_external(weights=str(ext_weights))
+        eq(again.model_id, card.model_id, "同一权重重复导入返回同一卡片")
+        eq(len(registry.list()), 1, "不产生第二张卡片")
+
+        # 只支持 .pt
+        onnx = ext_dir / "m.onnx"
+        onnx.write_bytes(b"x")
+        try:
+            registry.register_external(weights=str(onnx))
+            check(False, "非 .pt 应被拒绝")
+        except ValueError as exc:
+            contains(str(exc), ".pt", "非 .pt 报错说明原因")
+
+        # 权重不存在
+        try:
+            registry.register_external(weights=str(ext_dir / "nope.pt"))
+            check(False, "权重不存在应报错")
+        except ValueError as exc:
+            contains(str(exc), "不存在", "权重不存在报错")
+
+        # data.yaml 不存在
+        try:
+            registry.register_external(weights=str(ext_weights), data_yaml=str(tmp / "nope.yaml"))
+            check(False, "data.yaml 不存在应报错")
+        except ValueError as exc:
+            contains(str(exc), "data.yaml", "data.yaml 不存在报错")
+
+        # 非法任务类型
+        w2 = ext_dir / "other.pt"
+        w2.write_bytes(b"y")
+        try:
+            registry.register_external(weights=str(w2), task="bogus")
+            check(False, "非法任务类型应报错")
+        except ValueError as exc:
+            contains(str(exc), "任务类型", "非法任务类型报错")
+
+        # 显式 id + 非法字符被清洗 + 冲突
+        w3 = ext_dir / "third.pt"
+        w3.write_bytes(b"z")
+        explicit = registry.register_external(weights=str(w3), model_id="my external!!")
+        eq(explicit.model_id, "my_external", "显式 id 里的非法字符被清洗")
+        w4 = ext_dir / "fourth.pt"
+        w4.write_bytes(b"w")
+        try:
+            registry.register_external(weights=str(w4), model_id="my_external")
+            check(False, "重复的显式 id 应报错")
+        except ValueError as exc:
+            contains(str(exc), "已存在", "显式 id 冲突报错")
+
+        # 外部模型可以评估（走 /api/models/{id}/eval，依赖卡片里的 data.yaml）
+        eval_manager = make_eval_manager(tmp / "evals_ext")
+        services.set_managers(evaluation=eval_manager)
+        try:
+            resp = models_route.eval_model(card.model_id, ModelEvalRequest(split="test"))
+            job_id = resp["job"]["id"]
+            eval_job = wait_eval(eval_manager, job_id)
+            registry.attach_eval(card.model_id, eval_job, eval_manager.result(job_id))
+            loaded = registry.get(card.model_id)
+            eq(len(loaded.evals), 1, "外部模型的评估结果挂到卡片上")
+            eq(loaded.evals[0]["split"], "test", "记录评估划分")
+            check("mAP50" in (loaded.evals[0]["overall"] or {}), "记录评估指标")
+        finally:
+            eval_manager.shutdown()
+            services.reset_managers()
+            # reset 会把 registry 单例也清掉，这里重新挂回隔离的 registry，
+            # 否则后面的 API 调用会落到真实 storage
+            models_route.set_registry(registry)
+
+        # 没有 data.yaml 的外部模型：可导入，但评估被拒
+        no_data = registry.register_external(weights=str(generate_plain_pt(ext_dir, "nodata")))
+        eq(no_data.summary()["has_data_yaml"], False, "未提供 data.yaml 时摘要标明无")
+        try:
+            models_route.eval_model(no_data.model_id, ModelEvalRequest(split="test"))
+            check(False, "没有 data.yaml 时评估应被拒")
+        except HTTPException as exc:
+            eq(exc.status_code, 400, "没有 data.yaml 评估返回 400")
+
+        # API：正常导入
+        wapi = ext_dir / "api_ext.pt"
+        wapi.write_bytes(b"api")
+        response = models_route.import_model(
+            ModelImportRequest(weights=str(wapi), data_yaml=str(data_yaml), name="api 外部")
+        )
+        check(response.model["model_id"].startswith("ext_"), "通过 API 导入外部模型")
+        eq(response.model["training"]["source"], "external", "API 导入标记来源")
+
+        # API：非 .pt → 400
+        try:
+            models_route.import_model(ModelImportRequest(weights=str(onnx)))
+            check(False, "API 导入非 .pt 应返回 400")
+        except HTTPException as exc:
+            eq(exc.status_code, 400, "API 导入非 .pt 返回 400")
+    finally:
+        services.reset_managers()
+
+
+def generate_plain_pt(root: Path, stem: str) -> Path:
+    path = root / f"{stem}.pt"
+    path.write_bytes(b"fake")
+    return path
+
+
+# ---------------------------------------------------------------------------
+
+
 def main() -> int:
     print("YOLO Studio 评估模块测试")
     with tempfile.TemporaryDirectory() as raw:
@@ -948,6 +1095,7 @@ def main() -> int:
         test_registry(sub("registry"))
         test_compare(sub("compare"))
         test_models_api(sub("modelsapi"))
+        test_register_external(sub("external"))
 
     print("\n" + "=" * 60)
     if _failures:

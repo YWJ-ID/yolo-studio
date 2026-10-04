@@ -19,6 +19,7 @@ from ...schemas import (
     ModelCompareRequest,
     ModelDetailResponse,
     ModelEvalRequest,
+    ModelImportRequest,
     ModelListResponse,
     ModelRegisterRequest,
     ModelSummary,
@@ -63,6 +64,29 @@ def register_model(req: ModelRegisterRequest) -> ModelDetailResponse:
         raise HTTPException(status_code=400, detail=f"训练任务 {req.job_id} 没有权重目录，无法注册")
 
     card = get_registry_singleton().register_from_training(job)
+    return ModelDetailResponse(model=card.to_dict())
+
+
+@router.post("/import", response_model=ModelDetailResponse)
+def import_model(req: ModelImportRequest) -> ModelDetailResponse:
+    """导入一个外部 `.pt` 权重进模型库（非训练任务）。
+
+    导入后即可对它发起评估、对比、导出。评估需要 `data.yaml`（真值），
+    未提供时卡片仍可导入，但评估会被拒。
+    """
+    try:
+        card = get_registry_singleton().register_external(
+            weights=req.weights,
+            data_yaml=req.data_yaml,
+            name=req.name,
+            task=req.task,
+            classes=req.classes,
+            imgsz=req.imgsz,
+            batch=req.batch,
+            model_id=req.model_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ModelDetailResponse(model=card.to_dict())
 
 

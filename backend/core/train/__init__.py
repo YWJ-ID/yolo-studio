@@ -36,12 +36,23 @@ from .spec import (
     TrainSpec,
 )
 from .ultralytics_backend import UltralyticsBackend
+from .weights import (
+    FORMAT_PT,
+    FORMAT_STRUCTURE,
+    MAX_WEIGHT_BYTES,
+    candidate_weights,
+    normalize_weight_filename,
+    weight_format,
+)
 
 __all__ = [
     "ALL_STATUSES",
     "BACKEND_ULTRALYTICS",
     "DEFAULT_WEIGHTS",
+    "FORMAT_PT",
+    "FORMAT_STRUCTURE",
     "HEADLINE_METRICS",
+    "MAX_WEIGHT_BYTES",
     "JobNotFound",
     "JobStateError",
     "MetricRow",
@@ -63,6 +74,7 @@ __all__ = [
     "TrainingJob",
     "TrainingManager",
     "UltralyticsBackend",
+    "candidate_weights",
     "default_monitor",
     "interpreter",
     "is_active",
@@ -70,10 +82,12 @@ __all__ = [
     "list_artifacts",
     "load_jobs",
     "make_job_id",
+    "normalize_weight_filename",
     "parse_results_csv",
     "pick_preview",
     "resolve_artifact",
     "resolve_device",
     "save_job",
+    "weight_format",
     "write_spec",
 ]

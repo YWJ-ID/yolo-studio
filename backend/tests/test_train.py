@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -541,6 +542,149 @@ def test_artifacts(tmp: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# 基础模型候选与上传（自定义基础模型）
+# ---------------------------------------------------------------------------
+
+
+def test_weights(tmp: Path) -> None:
+    print("\n== 基础模型候选与上传 ==")
+    import io
+
+    from fastapi import HTTPException, UploadFile
+
+    from app import services
+    from app.api.routes import train as train_route
+    from core.registry import ModelRegistry
+    from core.train.weights import (
+        FORMAT_PT,
+        FORMAT_STRUCTURE,
+        builtin_weights,
+        candidate_weights,
+        normalize_weight_filename,
+        scan_runs,
+        scan_weights_dir,
+        weight_format,
+    )
+
+    eq(weight_format("yolo11n.yaml"), FORMAT_STRUCTURE, "yaml 视为结构文件")
+    eq(weight_format("YOLO11N.PT"), FORMAT_PT, "pt 视为预训练权重（大小写不敏感）")
+    eq(weight_format("notes.txt"), "", "非权重文件不识别")
+
+    # 文件名校验：取 basename（消除路径穿越）+ 后缀限制
+    eq(normalize_weight_filename("C:\\tmp\\evil.pt"), "evil.pt", "取 basename，去掉 Windows 路径")
+    eq(normalize_weight_filename("a/b/custom.yaml"), "custom.yaml", "取 basename，去掉 POSIX 路径")
+    eq(normalize_weight_filename("../x.pt"), "x.pt", "路径穿越被 basename 化，落点仍在权重目录")
+    for bad in ("x.txt", "", "..", "   "):
+        try:
+            normalize_weight_filename(bad)
+            check(False, f"非法权重名应报错: {bad!r}")
+        except ValueError:
+            check(True, f"非法权重名被拒绝: {bad!r}")
+
+    # 内置结构文件：从零训练、离线
+    builtin = builtin_weights(tmp / "weights", tasks=["detect", "classify"])
+    yaml_items = [i for i in builtin if i["format"] == FORMAT_STRUCTURE]
+    check(any(i["value"] == "yolo11n.yaml" for i in yaml_items), "内置检测结构文件在列")
+    check(any(i["value"] == "yolo11-cls.yaml" for i in yaml_items), "内置分类结构文件在列")
+    check(all(i["exists"] is False for i in yaml_items), "结构文件不依赖本地文件")
+    pt_builtin = [i for i in builtin if i["value"] == "yolo11n.pt"][0]
+    check(pt_builtin["exists"] is False, "未缓存的预训练权重标记 exists=False（会联网下载）")
+
+    # 权重目录扫描：只认权重后缀，且可跳过与内置同名的文件
+    wdir = tmp / "weights"
+    wdir.mkdir(parents=True, exist_ok=True)
+    (wdir / "my_model.pt").write_bytes(b"pt-bytes")
+    (wdir / "note.txt").write_text("x", encoding="utf-8")
+    scanned = scan_weights_dir(wdir)
+    eq([Path(i["value"]).name for i in scanned], ["my_model.pt"], "只列出权重文件")
+    eq(scanned[0]["size_bytes"], len(b"pt-bytes"), "记录文件大小")
+    (wdir / "yolo11n.pt").write_bytes(b"cached")
+    skipped = scan_weights_dir(wdir, skip_names={"yolo11n.pt"})
+    check(all(Path(i["value"]).name != "yolo11n.pt" for i in skipped), "与内置同名的文件被跳过")
+
+    # 历史训练产物（放在独立目录，避免被 TrainingManager 当成真实任务加载）
+    hist = tmp / "hist"
+    run = hist / "runs" / "job_a"
+    (run / "weights").mkdir(parents=True, exist_ok=True)
+    (run / "weights" / "best.pt").write_bytes(b"best")
+    (run / "job.json").write_text(json.dumps({"spec": {"task": "classify"}}), encoding="utf-8")
+    run_items = scan_runs(hist / "runs")
+    eq(len(run_items), 1, "扫描到历史训练产物 best.pt")
+    eq(run_items[0]["task"], "classify", "从 job.json 读回任务类型")
+    eq(run_items[0]["source"], "run", "标记来源为历史产物")
+
+    # 汇总去重：模型库卡片用 dict 形态（指向另一个文件，与历史产物并存）
+    store = hist / "model_store"
+    store.mkdir(parents=True, exist_ok=True)
+    (store / "registered.pt").write_bytes(b"reg")
+    cards = [
+        {
+            "model_id": "m1",
+            "name": "dms_v1",
+            "task": "detect",
+            "classes": ["a"],
+            "weights": {"best": str(store / "registered.pt")},
+        }
+    ]
+    merged = candidate_weights(weights_dir=wdir, runs_dir=hist / "runs", cards=cards)
+    values = [i["value"] for i in merged]
+    eq(len(values), len(set(values)), "候选值不重复")
+    check(any(i["source"] == "model_library" and i["task"] == "detect" for i in merged), "模型库候选带任务类型")
+    check(any(i["source"] == "run" for i in merged), "历史产物进入候选")
+    check(any(i["value"] == "yolo11n.yaml" for i in merged), "内置结构文件仍在候选")
+    eq([i["source"] for i in merged], sorted([i["source"] for i in merged], key=lambda s: {"builtin": 0, "weights_dir": 1, "model_library": 2, "run": 3}.get(s, 9)), "候选按来源排序")
+
+    # 同一路径只保留一条（模型库与历史产物指向同一文件时去重）
+    dup_cards = [{"model_id": "m2", "name": "dup", "task": "detect", "weights": {"best": str(run / "weights" / "best.pt")}}]
+    deduped = candidate_weights(weights_dir=wdir, runs_dir=hist / "runs", cards=dup_cards)
+    eq(sum(1 for i in deduped if i["value"] == str((run / "weights" / "best.pt").resolve())), 1, "同一路径只保留一条")
+
+    # 上传接口（路由函数直调）
+    print("\n== /api/train/weights 上传接口 ==")
+    manager = make_manager(tmp, FakeBackend())
+    train_route.set_manager(manager)
+    services.set_managers(registry=ModelRegistry(tmp / "models"))
+    try:
+        listed = train_route.list_base_weights()
+        check(len(listed.weights) > 0, "接口列出候选权重")
+        eq(listed.weights_dir, str(tmp / "weights"), "返回权重目录")
+
+        def make_upload(name: str, data: bytes) -> UploadFile:
+            return UploadFile(file=io.BytesIO(data), filename=name)
+
+        res = train_route.upload_base_weight(make_upload("my_custom.pt", b"hello"), overwrite=False)
+        eq(res.name, "my_custom.pt", "上传成功返回文件名")
+        eq(res.size_bytes, 5, "返回大小")
+        eq(res.sha256, hashlib.sha256(b"hello").hexdigest(), "返回 sha256")
+        check((tmp / "weights" / "my_custom.pt").is_file(), "文件落盘到权重目录")
+
+        try:
+            train_route.upload_base_weight(make_upload("my_custom.pt", b"again"), overwrite=False)
+            check(False, "同名文件默认不覆盖，应报 409")
+        except HTTPException as exc:
+            eq(exc.status_code, 409, "同名上传返回 409")
+
+        train_route.upload_base_weight(make_upload("my_custom.pt", b"again"), overwrite=True)
+        eq((tmp / "weights" / "my_custom.pt").read_bytes(), b"again", "overwrite=true 覆盖成功")
+
+        try:
+            train_route.upload_base_weight(make_upload("bad.txt", b"x"), overwrite=False)
+            check(False, "非法后缀应报 400")
+        except HTTPException as exc:
+            eq(exc.status_code, 400, "非法后缀返回 400")
+
+        check(not list((tmp / "weights").glob("*.part")), "上传后不留 .part 临时文件")
+    finally:
+        services.reset_managers()
+        manager.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# M2-02 API 层
+# ---------------------------------------------------------------------------
+
+
 def test_api_layer(tmp: Path) -> None:
     print("\n== API 层（路由函数直调） ==")
     from fastapi import HTTPException
@@ -564,6 +708,7 @@ def test_api_layer(tmp: Path) -> None:
 
         paths = {getattr(r, "path", None) for r in fastapi_app.routes}
         check("/api/train/jobs" in paths, "训练任务集合路由已注册")
+        check("/api/train/weights" in paths, "基础模型候选路由已注册")
         check("/api/train/jobs/{job_id}/stop" in paths, "停止路由已注册")
         check("/api/train/jobs/{job_id}/resume" in paths, "续训路由已注册")
         check("/api/train/jobs/{job_id}/ws" in paths, "WebSocket 路由已注册")
@@ -755,6 +900,7 @@ def main() -> int:
         test_restart_adoption(sub("restart"))
         test_resources(sub("resources"))
         test_artifacts(sub("artifacts"))
+        test_weights(sub("weights"))
         test_api_layer(sub("api"))
         test_websocket_bridge(sub("ws"))
         test_log_persistence(sub("logs"))

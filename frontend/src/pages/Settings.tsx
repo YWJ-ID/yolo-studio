@@ -26,7 +26,7 @@ const PATH_LABELS: Record<string, string> = {
   deploys_dir: '导出产物',
   uploads_dir: '上传/导入原始数据',
   reports_dir: '质量报告',
-  db_path: 'SQLite 数据库',
+  db_path: 'SQLite 数据库（保留字段，当前未使用）',
 }
 
 /** 设置页（M0-04 的前端呈现）：只读展示生效配置与运行环境，并说明如何覆盖。 */
@@ -269,6 +269,19 @@ export default function Settings() {
             </ul>
           </div>
         )}
+        <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0, fontSize: 12 }}>
+          CORS 允许来源（YOLO_STUDIO_CORS_ORIGINS）：
+          <Space size={4} wrap style={{ marginLeft: 4 }}>
+            {(config?.cors_origins ?? []).map((o) => (
+              <Tag key={o} className="mono">
+                {o}
+              </Tag>
+            ))}
+          </Space>
+          <br />
+          同源访问（后端托管前端，单端口 <Text code>scripts/start-server.ps1</Text>）不受 CORS 限制；
+          开发模式经 Vite 访问时，若来源不在上面，会被浏览器拦下。
+        </Paragraph>
         <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
           生产前端托管目录：<Text code>{config?.frontend_dist}</Text>{' '}
           {config?.frontend_dist_exists ? (

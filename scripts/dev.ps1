@@ -1,7 +1,8 @@
 ﻿# 一键启动前后端开发环境（两个独立窗口）
 # 用法： powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 #
-# 前后端分离：后端 8000，前端 5173（通过 Vite 代理调用 /api）
+# 前后端分离：后端 8010，前端 5173（通过 Vite 代理调用 /api）
+# 想从别的机器访问 / 单端口托管前端：用 scripts\start-server.ps1（见 docs/getting-started.md）
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot

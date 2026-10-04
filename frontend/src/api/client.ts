@@ -3,6 +3,7 @@ import type {
   AdapterInfo,
   AnalyticsReport,
   ArtifactsResponse,
+  BaseWeightsResponse,
   BrowseResponse,
   CleanReport,
   CleanRule,
@@ -36,6 +37,7 @@ import type {
   TaxonomySuggestResponse,
   TrainBackendsResponse,
   TrainJob,
+  WeightUploadResponse,
 } from '../types'
 
 const http = axios.create({
@@ -130,6 +132,19 @@ export const api = {
 
   // ---------- 训练（M2） ----------
   trainBackends: () => http.get<TrainBackendsResponse>('/api/train/backends').then((r) => r.data),
+
+  trainWeights: () => http.get<BaseWeightsResponse>('/api/train/weights').then((r) => r.data),
+
+  uploadTrainWeight: (file: File, overwrite = false) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http
+      .post<WeightUploadResponse>('/api/train/weights', form, {
+        params: overwrite ? { overwrite: true } : undefined,
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data)
+  },
 
   trainJobs: () => http.get<{ ok: boolean; jobs: TrainJob[] }>('/api/train/jobs').then((r) => r.data),
 
@@ -226,6 +241,17 @@ export const api = {
 
   registerModel: (jobId: string) =>
     http.post<{ ok: boolean; model: ModelCard }>('/api/models/register', { job_id: jobId }).then((r) => r.data),
+
+  importModel: (payload: {
+    weights: string
+    data_yaml?: string
+    name?: string
+    task?: string
+    classes?: string[]
+    imgsz?: number
+    batch?: number
+    model_id?: string
+  }) => http.post<{ ok: boolean; model: ModelCard }>('/api/models/import', payload).then((r) => r.data),
 
   evalModel: (id: string, payload: unknown) =>
     http.post<{ ok: boolean; job: EvalJob }>(`/api/models/${encodeURIComponent(id)}/eval`, payload).then((r) => r.data),

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -18,6 +19,14 @@ PROJECT_DIR = BACKEND_DIR.parent
 def _env_path(key: str, default: Path) -> Path:
     raw = os.environ.get(key)
     return Path(raw).resolve() if raw else default
+
+
+def _env_list(key: str, default: list) -> list:
+    """读一个「分号或逗号分隔」的列表环境变量；未设置时用默认值。"""
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return list(default)
+    return [item.strip() for item in re.split(r"[;,]", raw) if item.strip()]
 
 
 class Settings:
@@ -57,11 +66,13 @@ class Settings:
     # API 监听端口。避开 8000（本机已被 OpenAI 兼容网关占用）
     api_port: int = int(os.environ.get("YOLO_STUDIO_PORT", "8010"))
 
-    # CORS：Vite 默认 5173
-    cors_origins: list = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ]
+    # CORS 允许的来源。用 YOLO_STUDIO_CORS_ORIGINS 覆盖（分号或逗号分隔），
+    # 例如把服务放到别的机器上、从 http://192.168.1.20:8010 访问时需要加上该来源。
+    # 同源访问（后端托管前端，单端口）不受 CORS 限制，无需配置。
+    cors_origins: list = _env_list(
+        "YOLO_STUDIO_CORS_ORIGINS",
+        ["http://localhost:5173", "http://127.0.0.1:5173"],
+    )
 
     # 前端构建产物（生产模式下由 FastAPI 托管）
     frontend_dist: Path = PROJECT_DIR / "frontend" / "dist"
