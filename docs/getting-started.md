@@ -374,19 +374,24 @@ powershell -File scripts\start-backend.ps1 -BindHost 0.0.0.0
 powershell -File scripts\start-frontend.ps1 -BindHost 0.0.0.0
 ```
 
-这种模式用 `http://<服务器IP>:5173` 访问前端，浏览器 Origin 是 `http://<服务器IP>:5173`，
-**必须在后端放行它**，否则请求被 CORS 拦下：
+这种模式用 `http://<服务器IP或域名>:5173` 访问前端。默认前端通过 **Vite 代理**调用 `/api`
+（浏览器看到的仍是 5173，同源）——**同源就不会触发 CORS，因此通常不需要配 CORS**。
+只有当你不走代理、让前端**直连后端**时（设 `VITE_API_BASE=http://<IP>:8010`，浏览器直接请求 8010），
+才需要在后端放行该来源：
 
 ```powershell
+# 仅当 VITE_API_BASE 指向后端、浏览器直连 8010 时才需要
 $env:YOLO_STUDIO_CORS_ORIGINS = "http://192.168.1.20:5173"   # 分号或逗号分隔；重启后端生效
 ```
 
-> **Vite 的主机校验**（`server.allowedHosts`，5.4.12+ 的安全补丁）：用 **IP** 访问前端默认就放行；
-> 但用**主机名/域名**访问（如 `http://my-pc:5173`、隧道域名）会返回 `403 Blocked request. This host
-> ("my-pc") is not allowed.`。此时用 `VITE_ALLOWED_HOSTS` 放行（会读取 `frontend/.env.local`）：
+> **Vite 的主机校验**（`server.allowedHosts`，5.4.12+ 的安全补丁）：**IP 地址（含公网 IP）默认就放行**，
+> 不需要配置；只有用**主机名/域名**访问（如 `http://my-pc:5173`、隧道域名）才会返回
+> `403 Blocked request. This host ("my-pc") is not allowed.`，此时用 `VITE_ALLOWED_HOSTS` 放行
+> （会读取 `frontend/.env.local`）：
 >
 > ```powershell
-> $env:VITE_ALLOWED_HOSTS = "my-pc,my-pc.lan"    # 逗号分隔；重启前端 dev server 生效
+> # 填主机名/域名（不是 IP！）；逗号分隔；重启前端 dev server 生效
+> $env:VITE_ALLOWED_HOSTS = "my-pc,my-pc.lan,dev.example.com"
 > # 特殊值 true / all / * = 放行任意主机（关闭该防护，仅限可信内网）
 > ```
 
@@ -399,7 +404,7 @@ $env:YOLO_STUDIO_CORS_ORIGINS = "http://192.168.1.20:5173"   # 分号或逗号�
 | 防火墙 | Windows Defender 防火墙放行 8010/TCP |
 | **读取白名单** | `YOLO_STUDIO_ALLOWED_ROOTS="D:\datasets;D:\models"`。默认**空 = 不限制**，任何人都能读服务器上任意文件 |
 | **认证** | 本项目**没有登录/鉴权**。只在内网/VPN 用，或在前面套反代（Nginx/Caddy）做 Basic Auth |
-| CORS | 仅两端口开发模式需要（见上）；单端口同源不需要 |
+| CORS | 默认走 Vite 代理 = 同源，**不需要**；仅当 `VITE_API_BASE` 让前端直连后端时才需要（见上）。单端口同源也不需要 |
 
 ### 摄像头（实时验证）需要 HTTPS
 
