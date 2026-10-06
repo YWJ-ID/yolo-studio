@@ -15,9 +15,28 @@ from typing import Any, Dict, List, Optional
 
 from .spec import RESULT_FILE
 
-# 混淆矩阵方向：行=真实标签，列=预测标签（与 ultralytics 绘图一致）
-CM_AXIS = "rows=真实,cols=预测"
+# 混淆矩阵方向：行=预测标签，列=真实标签（与 ultralytics 绘图一致）
+CM_AXIS = "rows=预测,cols=真实"
 BACKGROUND_LABEL = "background"
+
+
+def normalize_confusion_matrix(cm: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """统一混淆矩阵的标签顺序与方向标注：background 固定放在最后。
+
+    ultralytics 的矩阵布局是「行=预测、列=真实、索引 nc 为 background」。
+    早期版本把 background 写到了标签的第一位（与矩阵实际布局相反），
+    因此这里在读取/构建时纠正标签顺序，保证旧结果文件也能正确显示。
+    **只调整标签，矩阵数据本身不做任何改动。**
+    """
+    if not cm or not cm.get("matrix"):
+        return cm
+    labels = list(cm.get("labels") or [])
+    if labels and labels[0] == BACKGROUND_LABEL and labels[-1] != BACKGROUND_LABEL:
+        labels = labels[1:] + [BACKGROUND_LABEL]
+    out = dict(cm)
+    out["labels"] = labels
+    out["axis"] = CM_AXIS
+    return out
 
 
 @dataclass
@@ -106,7 +125,10 @@ class EvalResult:
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         payload = {k: v for k, v in d.items() if k in known}
         payload["per_class"] = [ClassMetrics.from_dict(c) for c in d.get("per_class", [])]
-        return cls(**payload)
+        result = cls(**payload)
+        # 兼容早期把 background 写在标签首位的旧结果文件
+        result.confusion_matrix = normalize_confusion_matrix(result.confusion_matrix)
+        return result
 
     def save(self, path=None) -> Path:
         p = Path(path) if path else None
@@ -234,11 +256,13 @@ def build_result(payload: Dict[str, Any], spec, eval_id: str, duration_sec: floa
 
     cm = payload.get("confusion_matrix")
     if cm and cm.get("matrix"):
-        result.confusion_matrix = {
-            "axis": CM_AXIS,
-            "labels": list(cm.get("labels") or []),
-            "matrix": [[_int(v) for v in row] for row in cm["matrix"]],
-        }
+        result.confusion_matrix = normalize_confusion_matrix(
+            {
+                "axis": CM_AXIS,
+                "labels": list(cm.get("labels") or []),
+                "matrix": [[_int(v) for v in row] for row in cm["matrix"]],
+            }
+        )
 
     result.artifacts = [str(name) for name in (payload.get("artifacts") or [])]
     return result

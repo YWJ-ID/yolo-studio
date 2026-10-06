@@ -92,10 +92,10 @@ def _confusion_table(result: EvalResult) -> str:
         )
         rows.append(f"<tr><th>{escape(str(name))}</th>{cells}</tr>")
 
-    axis = escape(str(cm.get("axis") or "rows=真实,cols=预测"))
+    axis = escape(str(cm.get("axis") or "rows=预测,cols=真实"))
     return (
         '<div class="card">'
-        f'<table><thead><tr><th>真实 \\ 预测</th>{head}</tr></thead>'
+        f'<table><thead><tr><th>预测 \\ 真实</th>{head}</tr></thead>'
         f"<tbody>{''.join(rows)}</tbody></table>"
         f'<div class="legend">方向：{axis}；对角线为正确分类，非对角为误判。</div>'
         "</div>"

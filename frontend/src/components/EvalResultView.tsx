@@ -145,18 +145,18 @@ function ConfusionMatrixChart({ labels, matrix }: { labels: string[]; matrix: nu
         tooltip: {
           position: 'top',
           formatter: (p: any) =>
-            `真实 ${labels[p.value[1]] ?? '?'} → 预测 ${labels[p.value[0]] ?? '?'}: ${p.value[2]}`,
+            `预测 ${labels[p.value[1]] ?? '?'} → 真实 ${labels[p.value[0]] ?? '?'}: ${p.value[2]}`,
         },
         xAxis: {
           type: 'category',
           data: labels,
-          name: '预测',
+          name: '真实',
           axisLabel: { fontSize: 10, rotate: 30, color: '#595959' },
         },
         yAxis: {
           type: 'category',
           data: labels,
-          name: '真实',
+          name: '预测',
           axisLabel: { fontSize: 10, color: '#595959' },
         },
         visualMap: {

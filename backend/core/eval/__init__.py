@@ -26,7 +26,15 @@ from .job import (
 from .manager import EvalJobNotFound, EvalManager, EvalStateError
 from .compare import METRIC_LABELS, METRIC_ORDER, best_by, compare_eval_results
 from .report import render_eval_report, write_eval_report
-from .result import CM_AXIS, ClassMetrics, EvalResult, build_result, load_result
+from .result import (
+    BACKGROUND_LABEL,
+    CM_AXIS,
+    ClassMetrics,
+    EvalResult,
+    build_result,
+    load_result,
+    normalize_confusion_matrix,
+)
 from .spec import (
     RESULT_FILE,
     SPEC_FILE,
@@ -39,6 +47,7 @@ from .spec import (
 
 __all__ = [
     "ALL_STATUSES",
+    "BACKGROUND_LABEL",
     "CM_AXIS",
     "ClassMetrics",
     "EvalJob",
@@ -71,6 +80,7 @@ __all__ = [
     "load_jobs",
     "load_result",
     "make_eval_id",
+    "normalize_confusion_matrix",
     "render_eval_report",
     "save_job",
     "write_eval_report",

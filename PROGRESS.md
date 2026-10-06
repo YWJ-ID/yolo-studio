@@ -8,7 +8,7 @@
 - 技术栈：FastAPI (Python 3.9) + React 18 + Ant Design 5 + ECharts
 - 数据存储：文件系统（数据集版本自带的 `dataset_card.json` 记录血缘，无需数据库）
 - 训练后端：ultralytics（一期），预留 `TrainerBackend` 抽象
-- 最近更新：2026-10-02
+- 最近更新：2026-10-06
 
 > 新会话/新协作者请先读 [`docs/HANDOFF.md`](docs/HANDOFF.md)：
 > 里面有协作约定、环境事实、验证方式与可直接粘贴的续作提示。
@@ -403,3 +403,4 @@
 | 2026-09-30 | `ModelSummary` 增加 `source`（training / external）与 `has_data_yaml` 两个字段；`training.source` 默认 `training`，旧卡片完全兼容 |
 | 2026-10-01 | 支持**部署到另一台机器 / 局域网共享访问**：新增 `scripts/start-server.ps1`（单端口生产模式，默认 `0.0.0.0:8010`、不带 `--reload`）；`start-backend.ps1` / `start-frontend.ps1` 增加 `-BindHost` / `-Port` 参数（默认仍是仅本机）；`YOLO_STUDIO_CORS_ORIGINS` 环境变量（分号/逗号分隔，`app/config.py`）；`/api/system/config` 与设置页展示 CORS 来源；`docs/getting-started.md` 新增「部署到另一台机器」章节（含读写白名单、无鉴权、摄像头需 HTTPS 的提醒）；顺带修正文档里过期的测试数量与 `vite.config.ts`/`dev.ps1` 里「后端 8000」的旧注释 |
 | 2026-10-01 | 完成 **M2-08 自定义/上传基础模型**：新增 `core/train/weights.py`（候选汇总：内置 `.yaml`/`.pt`、`YOLO_STUDIO_WEIGHTS` 目录、模型库、历史训练产物；按绝对路径去重、内置同名去重；`normalize_weight_filename` 取 basename + 后缀白名单防目录穿越）；新增 `GET /api/train/weights`（候选项，含 source/task/exists/format）与 `POST /api/train/weights`（上传，默认不覆盖→409、非法后缀→400、超限→413、`.part` 临时文件原子替换、返回 sha256）；前端 `TrainNew.tsx` 权重改为动态候选（按 task 过滤、内置兜底）+「上传自定义权重」按钮；新增 `test_train.py::test_weights`（含路由注册断言）。测试与 `npm run build` 均通过 |
+| 2026-10-06 | 修复 **混淆矩阵标签错位**（用户实测 `train_20261001_015915_f74ccb` 暴露）：`core/eval/ultralytics_eval.py` 曾把 `background` 放在标签**首位**，与 ultralytics 实际布局（`(nc+1)×(nc+1)`、`background` 在**末位**、**行=预测、列=真实**）相反，导致类名整体错位一格、末类（Seatbelt）对角线显示为 0。修正：标签 background 移到末位、`CM_AXIS` 改为 `rows=预测,cols=真实`、HTML 报告表头改为「预测 \\ 真实」、前端热力图 X/Y 轴名与 tooltip 对调；新增 `normalize_confusion_matrix()` 在 `from_dict`/`build_result` 读取时**纠正旧结果文件**（只调标签、不动矩阵），旧评估无需重跑即恢复正确显示。补测试（含旧结果兼容）；全量 11 个测试文件通过 + `npm run build` 通过 |

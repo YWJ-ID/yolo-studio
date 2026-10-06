@@ -171,8 +171,8 @@ def test_spec_and_result(tmp: Path) -> None:
              "recall": 0.5, "f1": 0.54, "ap50": 0.7, "ap50_95": 0.4},
         ],
         "speed": {"inference": 7.2},
-        "confusion_matrix": {"labels": ["background", "square", "circle"],
-                             "matrix": [[0, 1, 0], [0, 2, 0], [0, 0, 1]]},
+        "confusion_matrix": {"labels": ["square", "circle", "background"],
+                             "matrix": [[2, 0, 0], [0, 1, 0], [0, 0, 1]]},
         "artifacts": ["confusion_matrix.png", "BoxPR_curve.png"],
     }
     result = build_result(payload, spec, eval_id="e1", duration_sec=1.25)
@@ -182,10 +182,20 @@ def test_spec_and_result(tmp: Path) -> None:
     eq(result.overall["f1"], 0.49, "没有 F1 时按逐类 F1 求均值")
     eq(len(result.per_class), 2, "逐类指标数量正确")
     eq(result.per_class[1].name, "circle", "逐类指标保留类名")
-    eq(result.confusion_matrix["matrix"][1][1], 2, "混淆矩阵按整数保存")
-    check("rows=真实" in result.confusion_matrix["axis"], "注明混淆矩阵方向")
+    eq(result.confusion_matrix["matrix"][0][0], 2, "混淆矩阵按整数保存")
+    eq(result.confusion_matrix["labels"], ["square", "circle", "background"], "background 固定在标签末位")
+    check("rows=预测" in result.confusion_matrix["axis"], "方向标注为 行=预测,列=真实")
     eq(result.model_name, "best.pt", "记录模型文件名")
     eq(result.artifacts, ["confusion_matrix.png", "BoxPR_curve.png"], "保留产物清单")
+
+    # 旧结果兼容：background 曾在标签首位，读取时纠正到最后（矩阵不动）
+    legacy = build_result(
+        {"ok": True, "confusion_matrix": {"labels": ["background", "square", "circle"],
+                                          "matrix": [[0, 1, 0], [0, 2, 0], [0, 0, 1]]}},
+        spec, eval_id="e5",
+    )
+    eq(legacy.confusion_matrix["labels"], ["square", "circle", "background"], "旧结果 background 被纠正到末位")
+    eq(legacy.confusion_matrix["matrix"][1][1], 2, "纠正标签不改动矩阵数据")
 
     # 往返
     path = tmp / "eval_result.json"
@@ -259,7 +269,7 @@ def test_extract_metrics(tmp: Path) -> None:
     eq(payload["per_class"][0]["name"], "square", "类名映射正确")
     eq(payload["per_class"][0]["instances"], 3, "逐类实例数来自 nt_per_class")
     eq(payload["confusion_matrix"]["matrix"][1][1], 2, "混淆矩阵转成 Python 整数")
-    eq(payload["confusion_matrix"]["labels"], ["background", "square", "circle"], "混淆矩阵标签含 background")
+    eq(payload["confusion_matrix"]["labels"], ["square", "circle", "background"], "混淆矩阵标签 background 在末位")
 
     # nc=0（Metric 的 __len__ 为 0）也不能被误判为“没有 metric”
     empty = extract_metrics(_FakeResults(0))
@@ -294,7 +304,7 @@ def test_lifecycle(tmp: Path) -> None:
         check(result is not None, "能读到结构化结果")
         eq(result.overall["mAP50"], 0.35, "mAP50 = base(0.2)+0.15")
         eq(len(result.per_class), 2, "逐类指标完整")
-        eq(result.confusion_matrix["labels"][0], "background", "混淆矩阵含 background")
+        eq(result.confusion_matrix["labels"][-1], "background", "混淆矩阵 background 在末位")
 
         logs = manager.logs("eval_ok")
         text = "\n".join(l["text"] for l in logs["lines"])
@@ -648,7 +658,7 @@ def test_report(tmp: Path) -> None:
         contains(html, "各类别 AP50-95", "含逐类 AP 条形图")
         contains(html, "<svg", "图表为内联 SVG")
         contains(html, "data:image/png;base64,", "过程图像以 base64 内嵌")
-        contains(html, "rows=真实,cols=预测", "注明混淆矩阵方向")
+        contains(html, "rows=预测,cols=真实", "注明混淆矩阵方向（行=预测，列=真实）")
 
         out = write_eval_report(result, tmp / "report" / "eval.html", images_dir=run_dir)
         check(out.is_file() and out.stat().st_size > 1000, "报告写出且非空")

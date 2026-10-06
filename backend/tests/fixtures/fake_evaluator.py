@@ -80,9 +80,9 @@ def main() -> int:
             "per_class": per_class,
             "speed": {"preprocess": 0.1, "inference": 7.2, "loss": 0.0, "postprocess": 0.3},
             "confusion_matrix": {
-                "axis": "rows=真实,cols=预测",
-                "labels": ["background", "square", "circle"],
-                "matrix": [[0, 1, 0], [0, 2, 0], [0, 0, 1]],
+                "axis": "rows=预测,cols=真实",
+                "labels": ["square", "circle", "background"],
+                "matrix": [[2, 0, 0], [0, 1, 0], [0, 0, 1]],
             },
             "artifacts": list(ARTIFACTS),
         }

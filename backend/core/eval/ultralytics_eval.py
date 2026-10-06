@@ -100,12 +100,13 @@ def extract_metrics(results) -> Dict[str, Any]:
     speed = getattr(results, "speed", None)
     payload["speed"] = {str(k): _f(v) for k, v in (speed or {}).items()} if speed else {}
 
-    # 混淆矩阵（行=真实，列=预测，含 background）
+    # 混淆矩阵（行=预测，列=真实，background 固定在最末一行/列）
+    # 与 ultralytics 的布局一致：matrix 形状 (nc+1, nc+1)，索引 nc 是 background。
     cm = getattr(results, "confusion_matrix", None)
     matrix = getattr(cm, "matrix", None)
     if matrix is not None:
         nc = int(getattr(cm, "nc", len(names)) or len(names))
-        labels = [BACKGROUND_LABEL] + [names.get(i, f"class_{i}") for i in range(nc)]
+        labels = [names.get(i, f"class_{i}") for i in range(nc)] + [BACKGROUND_LABEL]
         try:
             payload["confusion_matrix"] = {
                 "labels": labels,
