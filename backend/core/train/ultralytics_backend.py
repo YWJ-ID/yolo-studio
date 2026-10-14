@@ -27,7 +27,7 @@ class UltralyticsBackend(TrainerBackend):
     def resolve_weights(self, weights: str, base_dir: Optional[Path] = None) -> str:
         w = (weights or "").strip()
         if not w:
-            raise ValueError("未指定权重（可用 yolo11n.yaml 从零训练，或用 .pt 预训练权重）")
+            raise ValueError("未指定权重（可用 yolov8n.yaml 从零训练，或用 .pt 预训练权重）")
 
         # 1) 已经是存在的文件路径
         p = Path(w)
@@ -90,6 +90,30 @@ class UltralyticsBackend(TrainerBackend):
         }
         if spec.lr0 is not None:
             kwargs["lr0"] = spec.lr0
+        # 可选超参：只在用户显式设置时透传，否则保持 ultralytics 自己的默认值
+        optional = {
+            "lrf": spec.lrf,
+            "cos_lr": spec.cos_lr,
+            "warmup_epochs": spec.warmup_epochs,
+            "label_smoothing": spec.label_smoothing,
+            "dropout": spec.dropout,
+            "freeze": spec.freeze,
+            "close_mosaic": spec.close_mosaic,
+            "mosaic": spec.mosaic,
+            "mixup": spec.mixup,
+            "fliplr": spec.fliplr,
+            "hsv_h": spec.hsv_h,
+            "hsv_s": spec.hsv_s,
+            "hsv_v": spec.hsv_v,
+            "scale": spec.scale,
+            "translate": spec.translate,
+            "rect": spec.rect,
+            "cache": spec.cache,
+            "amp": spec.amp,
+        }
+        for key, value in optional.items():
+            if value is not None:
+                kwargs[key] = value
         if spec.resume:
             # 断点续训时 ultralytics 会忽略除 resume 外的多数参数，取自 checkpoint
             kwargs["resume"] = True

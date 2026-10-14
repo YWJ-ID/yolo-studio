@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Descriptions,
   Form,
   Input,
@@ -31,14 +32,15 @@ const { Text, Paragraph } = Typography
  */
 const WEIGHTS_BY_TASK: Record<string, { value: string; label: string }[]> = {
   detect: [
-    { value: 'yolo11n.yaml', label: 'yolo11n.yaml（结构文件，从零训练）' },
-    { value: 'yolo11s.yaml', label: 'yolo11s.yaml' },
-    { value: 'yolo11m.yaml', label: 'yolo11m.yaml' },
-    { value: 'yolo11n.pt', label: 'yolo11n.pt（预训练权重，需联网下载）' },
+    { value: 'yolov8n.yaml', label: 'yolov8n.yaml（结构文件，从零训练）' },
+    { value: 'yolov8s.yaml', label: 'yolov8s.yaml（结构文件，从零训练）' },
+    { value: 'yolov8m.yaml', label: 'yolov8m.yaml（结构文件，从零训练）' },
+    { value: 'yolov8n.pt', label: 'yolov8n.pt（预训练权重，需联网下载）' },
+    { value: 'yolov8s.pt', label: 'yolov8s.pt（预训练权重，需联网下载）' },
   ],
   classify: [
-    { value: 'yolo11-cls.yaml', label: 'yolo11-cls.yaml（结构文件，从零训练）' },
-    { value: 'yolo11n-cls.pt', label: 'yolo11n-cls.pt（预训练权重，需联网下载）' },
+    { value: 'yolov8-cls.yaml', label: 'yolov8-cls.yaml（结构文件，从零训练）' },
+    { value: 'yolov8n-cls.pt', label: 'yolov8n-cls.pt（预训练权重，需联网下载）' },
   ],
 }
 
@@ -49,6 +51,17 @@ const WEIGHT_SOURCE_ORDER: Record<string, number> = {
   model_library: 2,
   run: 3,
 }
+
+/** 三态布尔：留空 = 用框架默认，避免把「没设置」写成 false 覆盖掉框架默认值。 */
+const TRI_OPTIONS = [
+  { value: '', label: '默认' },
+  { value: 'true', label: '开启' },
+  { value: 'false', label: '关闭' },
+]
+
+const numOrNull = (v: unknown) => (v === undefined || v === null || v === '' ? null : Number(v))
+const boolOrNull = (v: unknown) => (v === 'true' ? true : v === 'false' ? false : null)
+const strOrNull = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v))
 
 
 /** 新建训练（M5-07 的新建部分）。 */
@@ -143,7 +156,25 @@ export default function TrainNew() {
         seed: values.seed,
         patience: values.patience,
         optimizer: values.optimizer,
-        lr0: values.lr0 ?? null,
+        lr0: numOrNull(values.lr0),
+        lrf: numOrNull(values.lrf),
+        cos_lr: boolOrNull(values.cos_lr),
+        warmup_epochs: numOrNull(values.warmup_epochs),
+        label_smoothing: numOrNull(values.label_smoothing),
+        dropout: numOrNull(values.dropout),
+        freeze: numOrNull(values.freeze),
+        close_mosaic: numOrNull(values.close_mosaic),
+        mosaic: numOrNull(values.mosaic),
+        mixup: numOrNull(values.mixup),
+        fliplr: numOrNull(values.fliplr),
+        hsv_h: numOrNull(values.hsv_h),
+        hsv_s: numOrNull(values.hsv_s),
+        hsv_v: numOrNull(values.hsv_v),
+        scale: numOrNull(values.scale),
+        translate: numOrNull(values.translate),
+        rect: boolOrNull(values.rect),
+        cache: strOrNull(values.cache),
+        amp: boolOrNull(values.amp),
         name: values.name?.trim() || null,
       })
       message.success('训练已启动')
@@ -238,7 +269,7 @@ export default function TrainNew() {
               >
                 <AutoComplete
                   options={weightOptions}
-                  placeholder={task === 'classify' ? '留空 = yolo11-cls.yaml' : '留空 = yolo11n.yaml'}
+                  placeholder={task === 'classify' ? '留空 = yolov8-cls.yaml' : '留空 = yolov8n.yaml'}
                   allowClear
                 />
               </Form.Item>
@@ -326,8 +357,137 @@ export default function TrainNew() {
             </Col>
           </Row>
 
+          <Collapse
+            ghost
+            style={{ marginBottom: 8 }}
+            items={[
+              {
+                key: 'strategy',
+                label: '训练策略与正则（留空 = 用 ultralytics 默认）',
+                children: (
+                  <Row gutter={16}>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="lrf" label="最终学习率系数 lrf" tooltip="相对 lr0，例如 0.01">
+                        <InputNumber min={0} step={0.01} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="cos_lr" label="余弦学习率调度">
+                        <Select options={TRI_OPTIONS} placeholder="默认" allowClear />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="warmup_epochs" label="warmup 轮数">
+                        <InputNumber min={0} step={0.5} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="close_mosaic" label="末 N 轮关闭 mosaic" tooltip="训练最后 N 轮停用 mosaic，通常能涨点">
+                        <InputNumber min={0} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="label_smoothing" label="标签平滑">
+                        <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="dropout" label="dropout（分类任务）">
+                        <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="freeze" label="冻结前 N 层" tooltip="迁移学习常用，0 表示不冻结">
+                        <InputNumber min={0} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                ),
+              },
+              {
+                key: 'augment',
+                label: '数据增强（留空 = 用 ultralytics 默认）',
+                children: (
+                  <Row gutter={16}>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="mosaic" label="mosaic">
+                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="mixup" label="mixup">
+                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="fliplr" label="水平翻转 fliplr">
+                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="scale" label="缩放 scale">
+                        <InputNumber min={0} step={0.1} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="translate" label="平移 translate">
+                        <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={8} md={4}>
+                      <Form.Item name="hsv_h" label="HSV-H">
+                        <InputNumber min={0} max={1} step={0.005} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={8} md={4}>
+                      <Form.Item name="hsv_s" label="HSV-S">
+                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={8} md={4}>
+                      <Form.Item name="hsv_v" label="HSV-V">
+                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} placeholder="默认" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                ),
+              },
+              {
+                key: 'engine',
+                label: '工程权衡（留空 = 用 ultralytics 默认）',
+                children: (
+                  <Row gutter={16}>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="rect" label="矩形训练 rect">
+                        <Select options={TRI_OPTIONS} placeholder="默认" allowClear />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="cache" label="数据缓存">
+                        <Select
+                          options={[
+                            { value: '', label: '不缓存' },
+                            { value: 'ram', label: '内存 ram' },
+                            { value: 'disk', label: '磁盘 disk' },
+                          ]}
+                          placeholder="默认"
+                          allowClear
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <Form.Item name="amp" label="混合精度 amp" tooltip="仅 GPU 有意义；CPU 自动忽略">
+                        <Select options={TRI_OPTIONS} placeholder="默认" allowClear />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                ),
+              },
+            ]}
+          />
+
           <Form.Item name="name" label="任务名" tooltip="同时作为训练目录名，留空自动生成">
-            <Input style={{ maxWidth: 360 }} placeholder="例如 dms_yolo11n_v1" allowClear />
+            <Input style={{ maxWidth: 360 }} placeholder="例如 dms_yolov8n_v1" allowClear />
           </Form.Item>
 
           <Form.Item>

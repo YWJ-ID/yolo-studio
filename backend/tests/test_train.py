@@ -177,7 +177,7 @@ def test_backend(tmp: Path) -> None:
     (wdir / "local.pt").write_bytes(b"x")
     eq(backend.resolve_weights("local.pt", base_dir=wdir), str((wdir / "local.pt").resolve()),
        "在权重目录中按文件名找到权重")
-    eq(backend.resolve_weights("yolo11n.yaml"), "yolo11n.yaml", "结构文件原样返回")
+    eq(backend.resolve_weights("yolov8n.yaml"), "yolov8n.yaml", "结构文件原样返回")
     real = wdir / "local.pt"
     eq(backend.resolve_weights(str(real)), str(real.resolve()), "已存在的文件路径原样返回")
     try:
@@ -186,8 +186,8 @@ def test_backend(tmp: Path) -> None:
     except ValueError as exc:
         contains(str(exc), "未指定权重", "空权重给出明确提示")
 
-    eq(backend.default_weights("detect"), "yolo11n.yaml", "检测默认权重")
-    eq(backend.default_weights("classify"), "yolo11-cls.yaml", "分类默认用 cls 结构文件")
+    eq(backend.default_weights("detect"), "yolov8n.yaml", "检测默认权重")
+    eq(backend.default_weights("classify"), "yolov8-cls.yaml", "分类默认用 cls 结构文件")
 
     # train_kwargs
     prepared = backend.train_kwargs(spec)
@@ -208,11 +208,61 @@ def test_backend(tmp: Path) -> None:
     eq(kwargs["lr0"], 0.005, "lr0 透传")
     eq(kwargs["cos_lr"], True, "extra 参数透传")
 
+    # 可选超参：未设置时不写入（保留 ultralytics 默认），设置了才透传
+    spec.lr0 = None
+    spec.extra = {}
+    kwargs = backend.train_kwargs(spec)["kwargs"]
+    check("lrf" not in kwargs and "mosaic" not in kwargs and "amp" not in kwargs,
+          "未设置的可选超参不写入命令行参数")
+    spec.lrf = 0.01
+    spec.cos_lr = True
+    spec.warmup_epochs = 3.0
+    spec.label_smoothing = 0.1
+    spec.dropout = 0.05
+    spec.freeze = 5
+    spec.close_mosaic = 10
+    spec.mosaic = 0.5
+    spec.mixup = 0.1
+    spec.fliplr = 0.5
+    spec.hsv_h = 0.015
+    spec.hsv_s = 0.7
+    spec.hsv_v = 0.4
+    spec.scale = 0.5
+    spec.translate = 0.1
+    spec.rect = False
+    spec.cache = "disk"
+    spec.amp = False
+    kwargs = backend.train_kwargs(spec)["kwargs"]
+    eq(kwargs["lrf"], 0.01, "lrf 透传")
+    eq(kwargs["cos_lr"], True, "cos_lr 透传")
+    eq(kwargs["warmup_epochs"], 3.0, "warmup_epochs 透传")
+    eq(kwargs["label_smoothing"], 0.1, "label_smoothing 透传")
+    eq(kwargs["dropout"], 0.05, "dropout 透传")
+    eq(kwargs["freeze"], 5, "freeze 透传")
+    eq(kwargs["close_mosaic"], 10, "close_mosaic 透传")
+    eq(kwargs["mosaic"], 0.5, "mosaic 透传")
+    eq(kwargs["mixup"], 0.1, "mixup 透传")
+    eq(kwargs["hsv_h"], 0.015, "hsv_h 透传")
+    eq(kwargs["scale"], 0.5, "scale 透传")
+    eq(kwargs["translate"], 0.1, "translate 透传")
+    eq(kwargs["rect"], False, "rect=False 也透传")
+    eq(kwargs["cache"], "disk", "cache 透传")
+    eq(kwargs["amp"], False, "amp=False 也透传")
+
+    # 序列化往返包含新字段
+    roundtrip = TrainSpec.from_dict(spec.to_dict())
+    eq(roundtrip.close_mosaic, 10, "to_dict/from_dict 保留 close_mosaic")
+    eq(roundtrip.cache, "disk", "to_dict/from_dict 保留 cache")
+
     # 校验
     bad = TrainSpec(data_yaml=str(tmp / "missing.yaml"), project=str(tmp), name="x", epochs=0)
     problems = bad.validate()
     check(any("data.yaml" in p for p in problems), "缺少 data.yaml 会被检出")
     check(any("epochs" in p for p in problems), "非法 epochs 会被检出")
+    bad_cache = TrainSpec(data_yaml=str(tmp / "missing.yaml"), project=str(tmp), name="x", cache="bad")
+    check(any("cache" in p for p in bad_cache.validate()), "非法 cache 会被检出")
+    bad_lrf = TrainSpec(data_yaml=str(tmp / "missing.yaml"), project=str(tmp), name="x", lrf=-1.0)
+    check(any("lrf" in p for p in bad_lrf.validate()), "负 lrf 会被检出")
 
 
 # ---------------------------------------------------------------------------
@@ -567,8 +617,8 @@ def test_weights(tmp: Path) -> None:
         weight_format,
     )
 
-    eq(weight_format("yolo11n.yaml"), FORMAT_STRUCTURE, "yaml 视为结构文件")
-    eq(weight_format("YOLO11N.PT"), FORMAT_PT, "pt 视为预训练权重（大小写不敏感）")
+    eq(weight_format("yolov8n.yaml"), FORMAT_STRUCTURE, "yaml 视为结构文件")
+    eq(weight_format("YOLOV8N.PT"), FORMAT_PT, "pt 视为预训练权重（大小写不敏感）")
     eq(weight_format("notes.txt"), "", "非权重文件不识别")
 
     # 文件名校验：取 basename（消除路径穿越）+ 后缀限制
@@ -585,10 +635,10 @@ def test_weights(tmp: Path) -> None:
     # 内置结构文件：从零训练、离线
     builtin = builtin_weights(tmp / "weights", tasks=["detect", "classify"])
     yaml_items = [i for i in builtin if i["format"] == FORMAT_STRUCTURE]
-    check(any(i["value"] == "yolo11n.yaml" for i in yaml_items), "内置检测结构文件在列")
-    check(any(i["value"] == "yolo11-cls.yaml" for i in yaml_items), "内置分类结构文件在列")
+    check(any(i["value"] == "yolov8n.yaml" for i in yaml_items), "内置检测结构文件在列")
+    check(any(i["value"] == "yolov8-cls.yaml" for i in yaml_items), "内置分类结构文件在列")
     check(all(i["exists"] is False for i in yaml_items), "结构文件不依赖本地文件")
-    pt_builtin = [i for i in builtin if i["value"] == "yolo11n.pt"][0]
+    pt_builtin = [i for i in builtin if i["value"] == "yolov8n.pt"][0]
     check(pt_builtin["exists"] is False, "未缓存的预训练权重标记 exists=False（会联网下载）")
 
     # 权重目录扫描：只认权重后缀，且可跳过与内置同名的文件
@@ -599,9 +649,9 @@ def test_weights(tmp: Path) -> None:
     scanned = scan_weights_dir(wdir)
     eq([Path(i["value"]).name for i in scanned], ["my_model.pt"], "只列出权重文件")
     eq(scanned[0]["size_bytes"], len(b"pt-bytes"), "记录文件大小")
-    (wdir / "yolo11n.pt").write_bytes(b"cached")
-    skipped = scan_weights_dir(wdir, skip_names={"yolo11n.pt"})
-    check(all(Path(i["value"]).name != "yolo11n.pt" for i in skipped), "与内置同名的文件被跳过")
+    (wdir / "yolov8n.pt").write_bytes(b"cached")
+    skipped = scan_weights_dir(wdir, skip_names={"yolov8n.pt"})
+    check(all(Path(i["value"]).name != "yolov8n.pt" for i in skipped), "与内置同名的文件被跳过")
 
     # 历史训练产物（放在独立目录，避免被 TrainingManager 当成真实任务加载）
     hist = tmp / "hist"
@@ -632,7 +682,7 @@ def test_weights(tmp: Path) -> None:
     eq(len(values), len(set(values)), "候选值不重复")
     check(any(i["source"] == "model_library" and i["task"] == "detect" for i in merged), "模型库候选带任务类型")
     check(any(i["source"] == "run" for i in merged), "历史产物进入候选")
-    check(any(i["value"] == "yolo11n.yaml" for i in merged), "内置结构文件仍在候选")
+    check(any(i["value"] == "yolov8n.yaml" for i in merged), "内置结构文件仍在候选")
     eq([i["source"] for i in merged], sorted([i["source"] for i in merged], key=lambda s: {"builtin": 0, "weights_dir": 1, "model_library": 2, "run": 3}.get(s, 9)), "候选按来源排序")
 
     # 同一路径只保留一条（模型库与历史产物指向同一文件时去重）
@@ -867,7 +917,7 @@ def test_no_heavy_import(tmp: Path) -> None:
         f"sys.path.insert(0, r'{BACKEND_DIR}');"
         "from core.train import TrainingManager, UltralyticsBackend, TrainSpec;"
         "b=UltralyticsBackend();"
-        "s=TrainSpec(data_yaml='x.yaml', project='p', name='n', weights='yolo11n.yaml');"
+        "s=TrainSpec(data_yaml='x.yaml', project='p', name='n', weights='yolov8n.yaml');"
         "b.build_command(s); b.train_kwargs(s);"
         "print('ultralytics' in sys.modules, 'torch' in sys.modules)"
     )

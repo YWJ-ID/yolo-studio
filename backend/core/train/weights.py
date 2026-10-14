@@ -5,7 +5,7 @@
   * ultralytics 结构文件 `.yaml`（从零训练，**离线可用**，不下载）；
   * 预训练权重 `.pt`（放在 `YOLO_STUDIO_WEIGHTS` 目录里按文件名引用）；
   * 任意存在的绝对路径（例如历史训练产物、模型库里的 best.pt）；
-  * 交给 ultralytics 自动下载的名字（如 `yolo11n.pt`，首次使用会联网）。
+  * 交给 ultralytics 自动下载的名字（如 `yolov8n.pt`，首次使用会联网）。
 
 本模块只回答两个问题：
   1. 「有哪些基础模型可以直接选」（`candidate_weights`）；
@@ -35,14 +35,20 @@ MAX_WEIGHT_BYTES = 4 * 1024 ** 3
 
 # 内置结构文件：ultralytics 包自带，列出即表示「可离线从零训练」
 STRUCTURE_WEIGHTS: Dict[str, List[str]] = {
-    TASK_DETECT: ["yolo11n.yaml", "yolo11s.yaml", "yolo11m.yaml", "yolo11l.yaml", "yolo11x.yaml"],
-    TASK_CLASSIFY: ["yolo11-cls.yaml"],
+    TASK_DETECT: ["yolov8n.yaml", "yolov8s.yaml", "yolov8m.yaml", "yolov8l.yaml", "yolov8x.yaml"],
+    TASK_CLASSIFY: ["yolov8-cls.yaml"],
 }
 
 # 内置预训练权重：本地权重目录里没有时会由 ultralytics 联网下载
 PRETRAINED_WEIGHTS: Dict[str, List[str]] = {
-    TASK_DETECT: ["yolo11n.pt", "yolo11s.pt", "yolo11m.pt"],
-    TASK_CLASSIFY: ["yolo11n-cls.pt"],
+    TASK_DETECT: ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"],
+    TASK_CLASSIFY: [
+        "yolov8n-cls.pt",
+        "yolov8s-cls.pt",
+        "yolov8m-cls.pt",
+        "yolov8l-cls.pt",
+        "yolov8x-cls.pt",
+    ],
 }
 
 # 结果排序：内置在前，历史产物在后

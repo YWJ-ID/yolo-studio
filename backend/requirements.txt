@@ -24,7 +24,7 @@ ultralytics>=8.2
 psutil>=5.9
 
 # --- 可选：GPU 监控（无 NVIDIA 卡可不装，代码会自动降级为 CPU 面板） ---
-# pynvml>=11.5
+# pynvml>=11.5        # 新包名 nvidia-ml-py，同样提供 pynvml 模块
 
 # --- 可选：模型导出（M4）与 ONNX 推理（M6） ---
 # 导出 ONNX 需要 onnx（+ onnxslim 做图简化）；
@@ -44,6 +44,8 @@ psutil>=5.9
 #
 # 如果需要指定 CUDA 版本（例如部署到带 N 卡的服务器），**先**单独装 torch：
 #
+#   CUDA 12.8+（RTX 50 系 / Blackwell 必须用这个及以上）:
+#     uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 #   CUDA 12.1:
 #     uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 #   CUDA 11.8:
@@ -51,4 +53,11 @@ psutil>=5.9
 #   CPU（强制）:
 #     uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 #
+# 先卸掉 CPU 版再装（`uv pip uninstall torch torchvision`）：不卸的话 uv 看到版本号没变会直接跳过。
 # 再执行 uv pip install -r requirements.txt，uv 会复用已装的 torch 不再降级。
+#
+# Windows 上直接跑脚本更省事（读驱动版本 → 卸 CPU 版 → 装对应 CUDA 版 → 装 nvidia-ml-py）：
+#   powershell -ExecutionPolicy Bypass -File ..\scripts\install-gpu.ps1 -DryRun
+#
+# **RTX 50 系（Blackwell，sm_120）必须 cu128 及以上**：cu126/cu124 的 wheel 不含 sm_120
+# kernel，cuda_available 会是 True，但一开训练就报 "no kernel image is available"。

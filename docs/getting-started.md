@@ -184,12 +184,12 @@ cd backend
 # 只组装命令、不启动（用于确认参数与路径）
 .\.venv\Scripts\python.exe -m cli.main train `
     --data "storage\datasets\dms_grouped_demo\data.yaml" `
-    --weights yolo11n.yaml --epochs 1 --imgsz 32 --batch 4 --device cpu --dry-run
+    --weights yolov8n.yaml --epochs 1 --imgsz 32 --batch 4 --device cpu --dry-run
 
 # 真正训练（CPU）
 .\.venv\Scripts\python.exe -m cli.main train `
     --data "storage\datasets\dms_grouped_demo\data.yaml" `
-    --weights yolo11n.yaml --epochs 5 --imgsz 320 --device cpu --name my_run
+    --weights yolov8n.yaml --epochs 5 --imgsz 320 --device cpu --name my_run
 
 # 只启动不等待（适合长训练）
 .\.venv\Scripts\python.exe -m cli.main train --data <data.yaml> --no-wait
@@ -416,8 +416,8 @@ $env:YOLO_STUDIO_CORS_ORIGINS = "http://192.168.1.20:5173"   # 分号或逗号�
 
 ### 环境与数据
 
-- 服务器上装 **CUDA 版 torch**（见「训练环境」），`YOLO_STUDIO_DEVICE=auto` 会自动用 GPU；
-  可选装 `pynvml` 才有 GPU 利用率面板。
+- 服务器上装 **CUDA 版 torch**：`scripts\install-gpu.ps1` 一条命令搞定（见「训练环境」），
+  `YOLO_STUDIO_DEVICE=auto` 会自动用 GPU；`nvidia-ml-py`（GPU 利用率面板）由脚本一起装。
 - 血缘/路径都是写在 JSON 里的**绝对路径**。把别处的 `storage/` 直接拷过来会因盘符/路径不同而失效：
   建议在服务器上重新接入数据，或用 `YOLO_STUDIO_*` 把各目录指到实际位置后重新注册。
 - 关掉浏览器不影响训练/评估（服务端子进程）；但**后端进程要常驻**，重启后能接管仍在跑的进程。
@@ -428,33 +428,54 @@ $env:YOLO_STUDIO_CORS_ORIGINS = "http://192.168.1.20:5173"   # 分号或逗号�
 
 训练依赖（`ultralytics` + `torch` + `torchvision`）已声明在 `requirements.txt` 中。
 
-### 指定 CUDA 版本
+### 让项目检测到 GPU（装 CUDA 版 torch）
 
-`ultralytics` 会带上 PyPI 默认版 torch（Windows 默认 CPU 版，Linux 默认带 CUDA）。
-若要明确指定，**先**单独装 torch，再装 requirements：
+**Windows 上 `uv pip install -r requirements.txt` 装的是 CPU 版 torch**（PyPI 默认），
+所以有 N 卡的机器装完 `torch.cuda.is_available()` 仍是 `False`。用脚本按驱动支持的版本重装：
 
 ```powershell
-# CUDA 12.1
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-# CUDA 11.8
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-# 强制 CPU
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-uv pip install -r requirements.txt
+# 先看要做什么（不做任何改动）
+powershell -ExecutionPolicy Bypass -File scripts\install-gpu.ps1 -DryRun
+# 执行
+powershell -ExecutionPolicy Bypass -File scripts\install-gpu.ps1
 ```
+
+脚本的步骤：读 `nvidia-smi` 的驱动 / CUDA 版本与显卡的 compute capability → **先卸掉 CPU 版 torch**
+（不卸的话 uv 会认为版本号没变，直接跳过）→ 按对应 index 装 CUDA 版 → 装 `nvidia-ml-py`
+（训练详情页的 GPU 利用率面板）→ 跑一次真实矩阵乘法确认 kernel 可用。
+
+- **RTX 50 系是 Blackwell（compute capability 12.0），必须 cu128 及以上**。cu126/cu124 的 wheel
+  不含 sm_120 kernel：`cuda_available` 会是 `True`，但一开训练就报
+  `no kernel image is available for execution on the device`。脚本检测到这种组合会直接拒绝，
+  并提示升级驱动。
+- 装完必须**重启后端**（`--reload` 只重载源码，换 torch 这种二进制不够）。
+- 反向注意：日常别用 `uv pip install -r requirements.txt --reinstall`，它会把 torch 换回 CPU 版。
+
+不用脚本时的手动等价命令：
+
+```powershell
+cd backend
+$env:VIRTUAL_ENV = "$PWD\.venv"
+uv pip uninstall torch torchvision            # 必须先卸：否则 uv 认为版本没变而跳过
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+uv pip install nvidia-ml-py                   # GPU 利用率面板（可选）
+# 也可用 cu121 / cu118 / cpu 等其它 index
+```
+
+Linux 上 PyPI 默认 torch 就带 CUDA，通常不需要这一步；要指定版本时把 `--index-url` 换成
+`cu121` / `cu118` 等即可。
 
 ### 训练解释器与设备
 
 - 解释器默认当前解释器，需要指定其他环境时用 `YOLO_STUDIO_PYTHON`；
 - 设备：`YOLO_STUDIO_DEVICE=auto`（默认，有 CUDA 用 GPU 否则 CPU）/ `cpu` / `cuda:0`。
 
-当前本机 `torch.cuda.is_available()` = **False**，训练以 CPU 运行，
-前端可视化会自动降级为不显示 GPU 面板。
+开发用的本机是纯 CPU 环境（`torch.cuda.is_available()` = **False**），训练以 CPU 运行，
+前端可视化自动降级为不显示 GPU 面板；换到有 N 卡的机器后按上一节装 CUDA 版 torch 即可。
 
 ### 权重与离线
 
-- `.yaml` 结构文件（如 `yolo11n.yaml` / `yolo11-cls.yaml`）表示**从零训练**，
+- `.yaml` 结构文件（如 `yolov8n.yaml` / `yolov8-cls.yaml`）表示**从零训练**，
   文件在 ultralytics 包内，**不需要联网**；
 - `.pt` 预训练权重：先在 `storage/weights`（可用 `YOLO_STUDIO_WEIGHTS` 改）按文件名查找，
   找不到才交给 ultralytics 下载。

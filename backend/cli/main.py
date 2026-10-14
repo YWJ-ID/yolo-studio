@@ -503,6 +503,25 @@ def _cmd_train(args) -> int:
         seed=args.seed,
         patience=args.patience,
         optimizer=args.optimizer,
+        lr0=args.lr0,
+        lrf=args.lrf,
+        cos_lr=args.cos_lr,
+        warmup_epochs=args.warmup_epochs,
+        label_smoothing=args.label_smoothing,
+        dropout=args.dropout,
+        freeze=args.freeze,
+        close_mosaic=args.close_mosaic,
+        mosaic=args.mosaic,
+        mixup=args.mixup,
+        fliplr=args.fliplr,
+        hsv_h=args.hsv_h,
+        hsv_s=args.hsv_s,
+        hsv_v=args.hsv_v,
+        scale=args.scale,
+        translate=args.translate,
+        rect=args.rect,
+        cache=args.cache,
+        amp=args.amp,
     )
 
     backend = UltralyticsBackend()
@@ -1169,6 +1188,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--patience", type=int, default=100)
     p.add_argument("--optimizer", default="auto")
+    p.add_argument("--lr0", type=float, default=None, help="初始学习率（默认由优化器决定）")
+    p.add_argument("--lrf", type=float, default=None, help="最终学习率系数（相对 lr0）")
+    p.add_argument("--cos-lr", action=argparse.BooleanOptionalAction, default=None, help="余弦学习率调度")
+    p.add_argument("--warmup-epochs", type=float, default=None)
+    p.add_argument("--label-smoothing", type=float, default=None)
+    p.add_argument("--dropout", type=float, default=None)
+    p.add_argument("--freeze", type=int, default=None, help="冻结前 N 层")
+    p.add_argument("--close-mosaic", type=int, default=None, help="最后 N 轮关闭 mosaic")
+    p.add_argument("--mosaic", type=float, default=None)
+    p.add_argument("--mixup", type=float, default=None)
+    p.add_argument("--fliplr", type=float, default=None)
+    p.add_argument("--hsv-h", type=float, default=None)
+    p.add_argument("--hsv-s", type=float, default=None)
+    p.add_argument("--hsv-v", type=float, default=None)
+    p.add_argument("--scale", type=float, default=None)
+    p.add_argument("--translate", type=float, default=None)
+    p.add_argument("--rect", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--cache", choices=["ram", "disk"], default=None, help="数据集缓存方式")
+    p.add_argument("--amp", action=argparse.BooleanOptionalAction, default=None, help="混合精度（GPU）")
     p.add_argument("--name", default="", help="任务名/训练目录名，默认自动生成")
     p.add_argument("--runs-dir", default="", help="训练产物根目录，默认 backend/storage/runs")
     p.add_argument("--weights-dir", default="", help="预训练权重目录")
