@@ -6,6 +6,9 @@
 `dataset_card.json` 一起落盘，界面上也明确提示需要复核。
 
 预标注是批量推理，耗时较长，因此改成「后台任务 + 轮询」而不是同步请求。
+
+M7-04 复核 / 编辑：`/jobs/{id}/review/*` 让人逐张修正伪标签（增删框、改坐标与
+类别、标记已确认）。改动只作用于内存里的 IR，导出时随血缘一起记录。
 """
 
 from __future__ import annotations
@@ -14,11 +17,17 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ... import services_prelabel
 from ...schemas import (
+    PrelabelAnnotationRequest,
+    PrelabelAnnotationUpdate,
     PrelabelExportRequest,
     PrelabelExportResponse,
+    PrelabelImageStatusRequest,
     PrelabelJobResponse,
     PrelabelJobsResponse,
     PrelabelRequest,
+    PrelabelReviewPageResponse,
+    PrelabelReviewSampleResponse,
+    PrelabelReviewSummaryResponse,
     PrelabelSamplesResponse,
 )
 from ...services_infer import capability_report, discover_weights
@@ -76,11 +85,12 @@ def delete_job(job_id: str) -> dict:
 def get_samples(
     job_id: str,
     offset: int = Query(0, ge=0),
-    limit: int = Query(12, ge=1, le=100),
+    limit: int = Query(12, ge=1, le=200),
+    filter: str = Query("all", description="all | pending | confirmed | with_boxes | empty | edited"),
 ) -> PrelabelSamplesResponse:
     """预览样本：带预测框的图片清单，供前端叠加显示。"""
     try:
-        payload = services_prelabel.samples(job_id, offset=offset, limit=limit)
+        payload = services_prelabel.samples(job_id, offset=offset, limit=limit, filter_name=filter)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"预标注任务不存在: {job_id}") from None
     return PrelabelSamplesResponse(**payload)
@@ -102,3 +112,104 @@ def export_job(job_id: str, req: PrelabelExportRequest) -> PrelabelExportRespons
         report=payload["report"],
         job=job.snapshot() if job else {},
     )
+
+
+# ---------------------------------------------------------------------------
+# M7-04 复核 / 编辑
+# ---------------------------------------------------------------------------
+
+
+@router.get("/jobs/{job_id}/review/samples", response_model=PrelabelReviewPageResponse)
+def get_review_samples(
+    job_id: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(24, ge=1, le=200),
+    filter: str = Query("all", description="all | pending | confirmed | with_boxes | empty | edited"),
+) -> PrelabelReviewPageResponse:
+    """复核用的样本页（含稳定 box_id 与复核状态）。"""
+    try:
+        payload = services_prelabel.review_samples(
+            job_id, offset=offset, limit=limit, filter_name=filter
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"预标注任务不存在: {job_id}") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PrelabelReviewPageResponse(**payload)
+
+
+@router.get("/jobs/{job_id}/review/summary", response_model=PrelabelReviewSummaryResponse)
+def get_review_summary(job_id: str) -> PrelabelReviewSummaryResponse:
+    """复核进度统计（已确认 / 待复核 / 人改过 / 删过多少框）。"""
+    try:
+        summary = services_prelabel.review_summary_of(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"预标注任务不存在: {job_id}") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PrelabelReviewSummaryResponse(summary=summary)
+
+
+@router.post("/jobs/{job_id}/review/annotations", response_model=PrelabelReviewSampleResponse)
+def add_review_annotation(
+    job_id: str, req: PrelabelAnnotationRequest
+) -> PrelabelReviewSampleResponse:
+    """新增一条人工标注（人画的框，或整图类别）。"""
+    try:
+        payload = services_prelabel.add_review_annotation(
+            job_id, req.image_uid, req.category, bbox=req.bbox, kind=req.kind
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PrelabelReviewSampleResponse(**payload)
+
+
+@router.patch(
+    "/jobs/{job_id}/review/annotations/{ann_id}", response_model=PrelabelReviewSampleResponse
+)
+def update_review_annotation(
+    job_id: str, ann_id: str, req: PrelabelAnnotationUpdate
+) -> PrelabelReviewSampleResponse:
+    """修改一条标注的坐标 / 类别。"""
+    try:
+        payload = services_prelabel.update_review_annotation(
+            job_id, ann_id, category=req.category, bbox=req.bbox
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PrelabelReviewSampleResponse(**payload)
+
+
+@router.delete(
+    "/jobs/{job_id}/review/annotations/{ann_id}", response_model=PrelabelReviewSampleResponse
+)
+def remove_review_annotation(job_id: str, ann_id: str) -> PrelabelReviewSampleResponse:
+    """删除一条标注。"""
+    try:
+        payload = services_prelabel.remove_review_annotation(job_id, ann_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PrelabelReviewSampleResponse(**payload)
+
+
+@router.post(
+    "/jobs/{job_id}/review/images/{image_uid}/status",
+    response_model=PrelabelReviewSampleResponse,
+)
+def set_review_status(
+    job_id: str, image_uid: str, req: PrelabelImageStatusRequest
+) -> PrelabelReviewSampleResponse:
+    """标记某张图为「已确认」或「待复核」。"""
+    try:
+        payload = services_prelabel.set_review_status(job_id, image_uid, req.status)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PrelabelReviewSampleResponse(**payload)

@@ -51,6 +51,7 @@ from ..ir import (
     ImageRecord,
     make_uid,
 )
+from .review import next_annotation_id
 
 # 伪标签来源标识：写进 Annotation.meta 与 dataset_card，用于追溯
 SOURCE_MODEL = "model_prediction"
@@ -348,7 +349,12 @@ def _add_detections(bundle, image, result, config: PrelabelConfig, report: Prela
                 bbox=None,
                 kind="image",
                 score=top1.get("confidence"),
-                meta={"source": SOURCE_MODEL, "weights": config.weights, "conf": config.conf},
+                meta={
+                    "source": SOURCE_MODEL,
+                    "weights": config.weights,
+                    "conf": config.conf,
+                    "box_id": next_annotation_id(bundle),
+                },
             )
         )
         return 1
@@ -368,6 +374,7 @@ def _add_detections(bundle, image, result, config: PrelabelConfig, report: Prela
                     "source": SOURCE_MODEL,
                     "weights": config.weights,
                     "conf": config.conf,
+                    "box_id": next_annotation_id(bundle),
                 },
             )
         )

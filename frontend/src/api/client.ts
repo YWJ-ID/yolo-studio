@@ -28,6 +28,7 @@ import type {
   ModelCard,
   ModelSummary,
   PrelabelJob,
+  PrelabelReviewSummary,
   ResourceSample,
   SampleImage,
   ScanResponse,
@@ -368,6 +369,73 @@ export const api = {
       .post<{ ok: boolean; out_dir: string; report: ExportReport; job: PrelabelJob }>(
         `/api/prelabel/jobs/${encodeURIComponent(id)}/export`,
         payload,
+      )
+      .then((r) => r.data),
+
+  // ---------- 预标注复核 / 编辑（M7-04） ----------
+  prelabelReviewSamples: (
+    id: string,
+    filter = 'all',
+    offset = 0,
+    limit = 24,
+  ) =>
+    http
+      .get<{
+        ok: boolean
+        total: number
+        offset: number
+        limit: number
+        filter: string
+        categories: string[]
+        images: SampleImage[]
+        summary: PrelabelReviewSummary
+      }>(`/api/prelabel/jobs/${encodeURIComponent(id)}/review/samples`, {
+        params: { filter, offset, limit },
+      })
+      .then((r) => r.data),
+
+  prelabelReviewSummary: (id: string) =>
+    http
+      .get<{ ok: boolean; summary: PrelabelReviewSummary }>(
+        `/api/prelabel/jobs/${encodeURIComponent(id)}/review/summary`,
+      )
+      .then((r) => r.data),
+
+  addPrelabelAnnotation: (
+    id: string,
+    payload: { image_uid: string; category: string; bbox?: number[]; kind?: string },
+  ) =>
+    http
+      .post<{ ok: boolean; image: SampleImage; summary: PrelabelReviewSummary }>(
+        `/api/prelabel/jobs/${encodeURIComponent(id)}/review/annotations`,
+        payload,
+      )
+      .then((r) => r.data),
+
+  updatePrelabelAnnotation: (
+    id: string,
+    boxId: string,
+    payload: { category?: string; bbox?: number[] },
+  ) =>
+    http
+      .patch<{ ok: boolean; image: SampleImage; summary: PrelabelReviewSummary }>(
+        `/api/prelabel/jobs/${encodeURIComponent(id)}/review/annotations/${encodeURIComponent(boxId)}`,
+        payload,
+      )
+      .then((r) => r.data),
+
+  deletePrelabelAnnotation: (id: string, boxId: string) =>
+    http
+      .delete<{ ok: boolean; image: SampleImage; summary: PrelabelReviewSummary }>(
+        `/api/prelabel/jobs/${encodeURIComponent(id)}/review/annotations/${encodeURIComponent(boxId)}`,
+      )
+      .then((r) => r.data),
+
+  setPrelabelImageStatus: (id: string, imageUid: string, status: 'pending' | 'confirmed') =>
+    http
+      .post<{ ok: boolean; image: SampleImage; summary: PrelabelReviewSummary }>(
+        `/api/prelabel/jobs/${encodeURIComponent(id)}/review/images/${encodeURIComponent(imageUid)}/status`,
+        { status },
       )
       .then((r) => r.data),
 }

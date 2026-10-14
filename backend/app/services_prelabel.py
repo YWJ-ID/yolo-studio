@@ -23,11 +23,19 @@ from core.infer import InferSession
 from core.ir import DatasetBundle
 from core.prelabel import (
     PrelabelConfig,
+    add_annotation,
     annotate_bundle,
     attach_lineage,
+    attach_review_summary,
     build_bundle,
     ensure_prelabel_prefix,
+    find_annotation,
+    image_review_status,
     list_images,
+    remove_annotation,
+    review_summary,
+    set_image_status,
+    update_annotation,
 )
 from core.split import SplitConfig, assign_splits
 from core.taxonomy import TaxonomyConfig, apply_taxonomy
@@ -99,6 +107,8 @@ class PrelabelJob:
             "progress": dict(self.progress),
             "report": self.report,
             "export": self.export,
+            # 复核进度（人工修正伪标签）；bundle 尚未就绪时为 None
+            "review": review_summary(self.bundle) if self.bundle is not None else None,
             # 供前端判断能否进入「生成数据集」这一步
             "ready": self.status == STATUS_FINISHED and self.bundle is not None,
         }
@@ -182,6 +192,7 @@ def _run_job(job: PrelabelJob) -> None:
             job._session = None
 
         attach_lineage(bundle, report)
+        attach_review_summary(bundle)
         job.bundle = bundle
         job.report = report.to_dict()
         if report.ok:
@@ -220,25 +231,49 @@ def remove_job(job_id: str) -> bool:
     return True
 
 
-def samples(job_id: str, offset: int = 0, limit: int = 12) -> Dict[str, Any]:
-    """返回带预测框的预览样本（供前端叠加显示）。"""
+def samples(
+    job_id: str, offset: int = 0, limit: int = 12, filter_name: str = "all"
+) -> Dict[str, Any]:
+    """返回带预测框的预览样本（供前端叠加显示）。
+
+    `filter_name` 供复核时聚焦：all / pending / confirmed / with_boxes / empty / edited。
+    """
     job = get_job(job_id)
     if job is None:
         raise KeyError(job_id)
     if job.bundle is None:
-        return {"total": 0, "categories": [], "images": []}
+        return {"total": 0, "offset": 0, "limit": limit, "categories": [], "images": []}
 
     bundle = job.bundle
-    images = list(bundle.images.values())
+    images = [im for im in bundle.images.values() if _match_filter(bundle, im, filter_name)]
     total = len(images)
     page = images[offset : offset + max(0, limit)]
     return {
         "total": total,
         "offset": offset,
         "limit": limit,
+        "filter": filter_name,
         "categories": bundle.category_names(),
         "images": [_build_sample(bundle, im) for im in page],
     }
+
+
+def _match_filter(bundle: DatasetBundle, image, filter_name: str) -> bool:
+    name = (filter_name or "all").lower()
+    if name in ("", "all"):
+        return True
+    if name == "pending":
+        return image_review_status(image) != "confirmed"
+    if name == "confirmed":
+        return image_review_status(image) == "confirmed"
+    if name == "edited":
+        return bool(image.meta.get("review_touched"))
+    has_boxes = bool(bundle.annotations_of(image.uid))
+    if name == "with_boxes":
+        return has_boxes
+    if name == "empty":
+        return not has_boxes
+    return True
 
 
 def _build_sample(bundle: DatasetBundle, image) -> Dict[str, Any]:
@@ -253,15 +288,100 @@ def _build_sample(bundle: DatasetBundle, image) -> Dict[str, Any]:
         "group": image.group,
         "source_id": image.source_id,
         "num_objects": len(anns),
-        "objects": [
-            {
-                "category": a.category,
-                "kind": a.kind,
-                "bbox": list(a.bbox.as_tuple()) if a.bbox else None,
-            }
-            for a in anns
-        ],
+        "review_status": image_review_status(image),
+        "review_touched": bool(image.meta.get("review_touched")),
+        "objects": [_build_object(a) for a in anns],
     }
+
+
+def _build_object(a) -> Dict[str, Any]:
+    return {
+        "box_id": a.meta.get("box_id", ""),
+        "category": a.category,
+        "kind": a.kind,
+        "bbox": list(a.bbox.as_tuple()) if a.bbox else None,
+        "score": a.score,
+        # 来源与复核动作：让前端能区分「模型给的」「人改过的」「人新加的」
+        "source": a.meta.get("source", ""),
+        "review": a.meta.get("review", ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# M7-04 复核 / 编辑：人工修正伪标签
+# ---------------------------------------------------------------------------
+
+
+def _require_reviewable(job_id: str) -> PrelabelJob:
+    """取到可复核的任务；不存在 / 未完成分别抛 KeyError / ValueError。"""
+    job = get_job(job_id)
+    if job is None:
+        raise KeyError(job_id)
+    if job.bundle is None:
+        raise ValueError("任务尚未完成，无法复核")
+    return job
+
+
+def _review_payload(bundle: DatasetBundle, image_uid: str) -> Dict[str, Any]:
+    image = bundle.images[image_uid]
+    return {"image": _build_sample(bundle, image), "summary": review_summary(bundle)}
+
+
+def review_samples(
+    job_id: str, offset: int = 0, limit: int = 12, filter_name: str = "all"
+) -> Dict[str, Any]:
+    """复核用的样本页（含 box_id 与复核状态）。"""
+    job = _require_reviewable(job_id)
+    payload = samples(job_id, offset=offset, limit=limit, filter_name=filter_name)
+    payload["summary"] = review_summary(job.bundle) if job.bundle is not None else {}
+    return payload
+
+
+def review_summary_of(job_id: str) -> Dict[str, Any]:
+    job = _require_reviewable(job_id)
+    return review_summary(job.bundle)
+
+
+def add_review_annotation(
+    job_id: str, image_uid: str, category: str, bbox, kind: str = "bbox"
+) -> Dict[str, Any]:
+    job = _require_reviewable(job_id)
+    if image_uid not in job.bundle.images:
+        raise KeyError(f"图像不存在: {image_uid}")
+    add_annotation(job.bundle, image_uid, category, bbox=bbox, kind=kind)
+    job.updated_at = _now()
+    return _review_payload(job.bundle, image_uid)
+
+
+def update_review_annotation(
+    job_id: str, ann_id: str, category=None, bbox=None
+) -> Dict[str, Any]:
+    job = _require_reviewable(job_id)
+    found = find_annotation(job.bundle, ann_id)
+    if found is None:
+        raise KeyError(f"标注不存在: {ann_id}")
+    image, _ann = update_annotation(job.bundle, ann_id, category=category, bbox=bbox)
+    job.updated_at = _now()
+    return _review_payload(job.bundle, image.uid)
+
+
+def remove_review_annotation(job_id: str, ann_id: str) -> Dict[str, Any]:
+    job = _require_reviewable(job_id)
+    found = find_annotation(job.bundle, ann_id)
+    if found is None:
+        raise KeyError(f"标注不存在: {ann_id}")
+    image = remove_annotation(job.bundle, ann_id)
+    job.updated_at = _now()
+    return _review_payload(job.bundle, image.uid)
+
+
+def set_review_status(job_id: str, image_uid: str, status: str) -> Dict[str, Any]:
+    job = _require_reviewable(job_id)
+    if image_uid not in job.bundle.images:
+        raise KeyError(f"图像不存在: {image_uid}")
+    set_image_status(job.bundle, image_uid, status)
+    job.updated_at = _now()
+    return _review_payload(job.bundle, image_uid)
 
 
 def export_job(job_id: str, req) -> Dict[str, Any]:
@@ -273,6 +393,10 @@ def export_job(job_id: str, req) -> Dict[str, Any]:
         raise ValueError("任务尚未完成，无法导出")
 
     bundle = job.bundle
+
+    # 0) 复核汇总：固定在 taxonomy/clean 改动 bundle 之前采集，
+    #    保证血缘里记的是「人复核时看到的那份数据」。
+    attach_review_summary(bundle)
 
     # 1) 类别规范化（可选）
     taxonomy = getattr(req, "taxonomy", None)
@@ -373,10 +497,16 @@ __all__ = [
     "STATUS_PENDING",
     "STATUS_RUNNING",
     "PrelabelJob",
+    "add_review_annotation",
     "export_job",
     "get_job",
     "list_jobs",
     "remove_job",
+    "remove_review_annotation",
+    "review_samples",
+    "review_summary_of",
     "samples",
+    "set_review_status",
     "start_job",
+    "update_review_annotation",
 ]

@@ -8,7 +8,7 @@
 - 技术栈：FastAPI (Python 3.9) + React 18 + Ant Design 5 + ECharts
 - 数据存储：文件系统（数据集版本自带的 `dataset_card.json` 记录血缘，无需数据库）
 - 训练后端：ultralytics（一期），预留 `TrainerBackend` 抽象
-- 最近更新：2026-10-06
+- 最近更新：2026-10-14
 
 > 新会话/新协作者请先读 [`docs/HANDOFF.md`](docs/HANDOFF.md)：
 > 里面有协作约定、环境事实、验证方式与可直接粘贴的续作提示。
@@ -26,7 +26,7 @@
 | M4 | 部署导出 | 3/3 | **已完成** |
 | M5 | 前端界面 | 11/11 | **已完成** |
 | M6 | 实时验证 | 8/8 | **已完成**（含前端页面，已真实浏览器验证） |
-| M7 | 预标注（模型批量标框） | 3/3 | **已完成**：core / API / 前端向导 / CLI / 测试 / 血缘 |
+| M7 | 预标注（模型批量标框）+ 复核 | 4/4 | **已完成**：core / API / 前端向导 / CLI / 测试 / 血缘；含 **M7-04 复核/编辑**（人工修正伪标签） |
 
 **MVP 定义（一期目标）**：M0 全部 + M1 的 `M1-01/02/03/08/09/10` + M2 的 `M2-01/02/03/04` + M5 的 `M5-01/02/05`。
 
@@ -152,13 +152,19 @@
 | M7-01 | 批量推理 → 写入 IR（伪标注） | 已完成 | `core/prelabel/`：`build_bundle` / `annotate_bundle` / `run_prelabel`；复用 `core/infer` 常驻子进程；单张失败记入 `report.failures` 并跳过，不中断整批 |
 | M7-02 | 预标注 API + 前端向导 | 已完成 | `/api/prelabel/*`（formats/weights/jobs/samples/export）；后台线程跑推理（CPU 批量耗时长，不阻塞 HTTP），前端轮询 + 三步向导 `pages/PrelabelWizard.tsx` |
 | M7-03 | 血缘记录「伪标签」身份 | 已完成 | `dataset_card.json` 固定带 `prelabel` 段（权重/conf/iou/模型类别/生成时间 + 免责说明）；导出目录名强制 `prelabel` 前缀；页面与 CLI 均给出「必须人工复核」提示 |
+| M7-04 | 复核 / 编辑（人工修正伪标签） | 已完成 | `core/prelabel/review.py`（纯逻辑：增删标注 / 改坐标与类别 / 标记已确认 / 汇总）；`/api/prelabel/jobs/{id}/review/*`（samples/annotations/images/summary）；前端 `components/PrelabelReview.tsx` + `BoxEditor.tsx`（拖动 / 四角缩放 / 拖拽画框 / 键盘快捷键）。**不掩盖血缘**：模型框记 `model_prediction`、人改的记 `review=edited`+原框 `model_bbox`、人加的记 `source=human_review`，增删改计数落进 `dataset_card.json` 的 `prelabel.review` 段 |
 
 **M7 补充交付（与其它模块保持一致）**：
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 测试 `backend/tests/test_prelabel.py` | 已完成 | 97 断言：list_images / build_bundle / annotate（正常·失败·崩溃·空目录·分类）/ 血缘 / 导出卡片 / API 路由与错误路径。**回归了历史统计 bug**（`boxes_total` 未累加） |
+| 测试 `backend/tests/test_prelabel.py` | 已完成 | 152 断言：list_images / build_bundle / annotate（正常·失败·崩溃·空目录·分类）/ 血缘 / 导出卡片 / **M7-04 复核（增删改坐标与类别、越界夹取、退化框拒绝、汇总与血缘落盘）+ 复核 API 与错误路径** / API 路由。**回归了历史统计 bug**（`boxes_total` 未累加） |
 | CLI 子命令 `prelabel` | 已完成 | `--weights/--images/--conf/--iou/--limit/--out`；`--out` 时顺手导出（目录名自动带前缀）；`--list-formats` 复用推理格式探测 |
+
+> **M7-04 让「伪标签必须人工复核」从文案变成流程**：预标注完成后，在向导第 2 步
+> 逐张增删框 / 拖动缩放 / 改类别 / 标记已确认；只有复核过的框与「模型原始框」在
+> 血缘里可区分（`review=edited` / `source=human_review` / `boxes_removed`）。
+> 复核状态存内存（与 R-45 一致，见 R-49），服务重启后重跑预标注即可。
 
 > **M7 的定位重申（R-37）**：产出的是**伪标签**，不是标注。漏检 = 缺标注、误检 = 错标注，
 > 必须人工复核后才能作为训练数据。血缘与界面文案都不得暗示可跳过复核。
@@ -170,7 +176,7 @@
 | # | 事项 | 状态 | 说明 |
 |---|---|---|---|
 | R-01 | 训练框架范围 | 已决策 | 一期仅 ultralytics + `TrainerBackend` 抽象 |
-| R-02 | 本机无 CUDA | 观察中 | 训练为 CPU 模式，可视化需支持无 GPU 降级 |
+| R-02 | 本机无 CUDA | 观察中 | 训练为 CPU 模式，可视化需支持无 GPU 降级。**有 N 卡的机器**用 `scripts/install-gpu.ps1` 换 CUDA 版 torch（2026-10-14 新增） |
 | R-03 | Python 版本 | 已决策 | Python 3.9（`backend/.venv`） |
 | R-04 | 前端构建工具 | 已决策 | Vite |
 | R-05 | 训练环境方案 | 已决策 | 训练依赖声明在 `requirements.txt` 随 venv 安装；训练解释器默认当前解释器，可用 `YOLO_STUDIO_PYTHON` 覆盖 |
@@ -217,6 +223,8 @@
 | R-46 | **预标注任务疑似串行推理**（自查） | 已更正 | 首版实现里 `_run_job` 逐张同步推理；实测 6 张 CPU 3.3s、5 张 ONNX 4.8s，批量几百张会较久。这是 CPU 推理的固有代价（与 M6 同源），不是缺陷。任务在后台线程跑、前端轮询，不阻塞 HTTP |
 | R-47 | **`test_train` 存在环境相关的偶发失败（既有，与 M7 无关）** | 已知悉 | 现象：`test_api_layer` 偶尔在 `wait_terminal` 上**超时 25s**（失败运行总耗时 ~52s vs 正常 ~28s，差 ≈ 超时时间），随后 3 条断言失败（指标 1/2 行、增量取指标为空、已结束任务 stop 未 409），**无异常栈**——说明监控线程在 25s 内含异常地「没有收尾」。实测频率：单跑 `test_train.py` 约 1/8~1/12，**全量套件连跑时约 1/3**；把同一场景写成独立循环跑 40 次、以及给 `_finalize` 加异常探针后连跑 15 次，均**不复现**，故强依赖测试文件上下文 / 机器负载，而非单段逻辑。涉事代码是 `core/train/manager.py`（**M7 完全未改动**）。两个怀疑点：①`_finalize` 先置 `rt.finalized=True` 再干活，若中途抛错则再次进入只会 `finalize_done.wait()` 而永不落终态（R-42 的 `finalize_done` 会让这种 wedge「静默等待」）；②监控线程被 OS/AV 抢占长时间未 tick。**同类偶发也见于 `test_eval`**（一次性连跑 5 个文件时出现 140/2，单独跑仍 147 全过），指向环境/负载而非某个模块。**当前结论：以单次全量运行为准，但该文件并非稳定全绿。** 根治方向：收尾体加 `try/finally` 兜底落终态 + 给监控循环加看门狗；测试侧延长超时并打印超时诊断 |
 | R-48 | **外部导入模型的权重只引用、不复制** | 已决策 | `register_external` 把 `.pt` 的原路径记进 `weights.best`，不复制进模型库——与「模型卡只记引用、不复制权重」的既有决策一致（R-26），避免同一模型出现两份文件。代价同训练目录：**原文件被移动/删除后该模型失效**（详情页与列表会显示权重路径，可据此排查）。只支持 `.pt`，因为 ONNX/TorchScript 无法做 ultralytics val，登记进来会让「发起评估」变成坑 |
+| R-49 | **复核编辑（M7-04）的改动只存在内存里** | 已决策 | 复核增删改直接作用于预标注任务内存中的 IR，**不落盘**；服务重启后未导出的复核结果会丢失（与 R-45「预标注任务存在内存里」一致）。理由：复核是「跑一次 → 改 → 导出」的一次性流程，落盘会与数据集存储重复。界面上已注明任务「仅本次后端进程内」。坐标校验：越界**显式夹取**到图像边界、退化框（宽或高 ≤ 0）**拒绝**而不是静默接受——这是编辑动作本身的语义，不是对源数据的静默裁剪 |
+| R-50 | **CUDA torch 的安装脚本只有 Windows 版** | 已决策 | `scripts/install-gpu.ps1` 是 PowerShell 脚本。原因：**Windows 上 PyPI 默认 torch 是 CPU 版**（Linux 默认就带 CUDA），这个坑只存在于 Windows；Linux 需指定版本时按 `docs/getting-started.md` 的两条 `uv pip install --index-url` 手动装即可。脚本含一条硬约束：**Blackwell（compute capability 12.0，如 RTX 50 系）必须 cu128+**，否则 `cuda_available=True` 但 kernel 跑不起来，脚本在这种组合下直接拒绝并提示升级驱动 |
 
 ---
 
@@ -318,6 +326,11 @@
 | 2026-09-30 | 全量测试（含 M3-05 与 M7） | **1031 断言全部通过**（11 个测试文件：63/89/58/69/55/84/142/174/103/97/97）；本轮 `test_train` 未复现 R-47 偶发 |
 | 2026-10-01 | 远程/共享部署支持 | `YOLO_STUDIO_CORS_ORIGINS` 生效性实测：设 `http://192.168.1.20:8010; http://gpu.lan:5173,https://yolo.example.com` → 得到 3 条来源；未设时回落到默认 `localhost/127.0.0.1:5173`；`GET /api/system/config` 返回 `cors_origins`。前端 `npm run build` 通过 |
 | 2026-10-02 | Vite 开发服务器主机校验（`server.allowedHosts`） | `frontend/vite.config.ts` 增加 **`VITE_ALLOWED_HOSTS`**（逗号分隔，或 `true`/`all`/`*`）驱动 `server.allowedHosts`，默认不设置=保持原行为。实测（Vite 5.4.21，`npx vite --host 127.0.0.1 --port 5199`）：`Host: 127.0.0.1`→200、`Host: my-test.lan`（已放行）→200、`Host: evil.lan`（未放行）→403 `Blocked request`。用于从别的机器用主机名/域名访问 dev server；IP 访问默认已放行 |
+| 2026-10-12 | 新增 **M7-04 复核/编辑** 测试（并入 `test_prelabel.py`） | `test_prelabel.py` 97 → **152 断言**，全部通过；覆盖增删标注、改坐标与类别、模型原框留档（`model_bbox`）、越界夹取、退化框/空类别/非法形态拒绝、复核汇总与 `dataset_card` 落盘、复核 API 与错误路径（404/400/非法状态） |
+| 2026-10-12 | **真实端到端（DMS ONNX）**：预标注 → 复核 → 导出 | 用 `logix-fms-ahd/models/best_raw.onnx` 对 `tiny_det/images`（6 图）预标注，模型给出 4 框；复核：改坐标 + 改类别 + 加 1 框 + 删 1 框 + 确认 1 图；导出后 `dataset_card.json` 的 `prelabel.review` 记为 `human_added=1 / edited=1 / removed=1 / confirmed=1`；**磁盘标签行数与复核后框数一致**（该图 2 框 2 行） |
+| 2026-10-12 | 前端 `npm run build`（M7-04 复核界面） | 通过（tsc --noEmit + vite build）；`PrelabelWizard` chunk 60.8 kB（含复核编辑器 `PrelabelReview` + `BoxEditor`） |
+| 2026-10-12 | 全量测试（含 M7-04） | **1146 断言全部通过**（11 个文件：63/89/58/69/55/84/177/103/97/152/199）；本轮 `test_train` 未复现 R-47 偶发 |
+| 2026-10-14 | `scripts/install-gpu.ps1` 的探测逻辑（用假 `nvidia-smi` 桩逐场景**真实执行**） | 8 个场景全部符合预期：RTX 5070 / sm_120 / 驱动 CUDA 13.1 → 选 `cu129`；RTX 3080 / sm_86 / CUDA 12.4 → 选 `cu124`；**Blackwell + 驱动仅 CUDA 12.4 → 拒绝**并提示升级驱动；驱动未报 CUDA 版本 → 要求用 `-Index` 指定；老 `nvidia-smi` 无 `compute_cap` 字段 → 3 列回退可解析；`-Index cu128` 覆盖生效；`-Index cu999` 与「本机无 nvidia-smi」→ 明确报错并退出 1。脚本语法检查通过（PowerShell 5.1） |
 
 ---
 
@@ -404,3 +417,7 @@
 | 2026-10-01 | 支持**部署到另一台机器 / 局域网共享访问**：新增 `scripts/start-server.ps1`（单端口生产模式，默认 `0.0.0.0:8010`、不带 `--reload`）；`start-backend.ps1` / `start-frontend.ps1` 增加 `-BindHost` / `-Port` 参数（默认仍是仅本机）；`YOLO_STUDIO_CORS_ORIGINS` 环境变量（分号/逗号分隔，`app/config.py`）；`/api/system/config` 与设置页展示 CORS 来源；`docs/getting-started.md` 新增「部署到另一台机器」章节（含读写白名单、无鉴权、摄像头需 HTTPS 的提醒）；顺带修正文档里过期的测试数量与 `vite.config.ts`/`dev.ps1` 里「后端 8000」的旧注释 |
 | 2026-10-01 | 完成 **M2-08 自定义/上传基础模型**：新增 `core/train/weights.py`（候选汇总：内置 `.yaml`/`.pt`、`YOLO_STUDIO_WEIGHTS` 目录、模型库、历史训练产物；按绝对路径去重、内置同名去重；`normalize_weight_filename` 取 basename + 后缀白名单防目录穿越）；新增 `GET /api/train/weights`（候选项，含 source/task/exists/format）与 `POST /api/train/weights`（上传，默认不覆盖→409、非法后缀→400、超限→413、`.part` 临时文件原子替换、返回 sha256）；前端 `TrainNew.tsx` 权重改为动态候选（按 task 过滤、内置兜底）+「上传自定义权重」按钮；新增 `test_train.py::test_weights`（含路由注册断言）。测试与 `npm run build` 均通过 |
 | 2026-10-06 | 修复 **混淆矩阵标签错位**（用户实测 `train_20261001_015915_f74ccb` 暴露）：`core/eval/ultralytics_eval.py` 曾把 `background` 放在标签**首位**，与 ultralytics 实际布局（`(nc+1)×(nc+1)`、`background` 在**末位**、**行=预测、列=真实**）相反，导致类名整体错位一格、末类（Seatbelt）对角线显示为 0。修正：标签 background 移到末位、`CM_AXIS` 改为 `rows=预测,cols=真实`、HTML 报告表头改为「预测 \\ 真实」、前端热力图 X/Y 轴名与 tooltip 对调；新增 `normalize_confusion_matrix()` 在 `from_dict`/`build_result` 读取时**纠正旧结果文件**（只调标签、不动矩阵），旧评估无需重跑即恢复正确显示。补测试（含旧结果兼容）；全量 11 个测试文件通过 + `npm run build` 通过 |
+| 2026-10-06 | 训练基础模型由 **YOLO11 完全替换为 YOLOv8**：`core/train/spec.py` 默认权重改为 `yolov8n.yaml` / `yolov8-cls.yaml`；`core/train/weights.py` 内置结构文件改为 `yolov8n/s/m/l/x.yaml` + `yolov8-cls.yaml`，预训练候选改为 `yolov8n/s/m/l/x.pt` + `yolov8n/s/m/l/x-cls.pt`（未缓存会提示联网下载）；`ultralytics_backend.py` 提示文案、`TrainNew.tsx` 兜底候选/占位符、`docs/getting-started.md` 示例同步更新。测试与 `npm run build` 通过 |
+| 2026-10-06 | 补充**训练可选超参（A 档）**：`TrainSpec`/`TrainRequest` 新增 `lrf` `cos_lr` `warmup_epochs` `label_smoothing` `dropout` `freeze` `close_mosaic` `mosaic` `mixup` `fliplr` `hsv_h/s/v` `scale` `translate` `rect` `cache` `amp`（全部 `Optional=None`）；`train_kwargs` 改为「设了才透传」，留空保留 ultralytics 默认；`validate()` 增加 lrf/warmup/freeze 非负与 cache 取值校验；CLI `train` 补齐这些参数（含此前缺失的 `--lr0`）与 `BooleanOptionalAction` 三态开关；前端新建训练页新增「训练策略与正则 / 数据增强 / 工程权衡」三个折叠面板，布尔用「默认/开启/关闭」三态避免误写成 false 覆盖框架默认。测试补可选超参透传、序列化往返与校验断言；全量 11 个测试文件通过 + `npm run build` 通过。注：本轮 `test_train` 复现的既有偶发为 **R-47**（环境/负载相关，与本改动无关） |
+| 2026-10-12 | 完成 **M7-04 复核 / 编辑**（把「伪标签必须人工复核」从文案变成流程）：新增 `core/prelabel/review.py`（纯逻辑：`add_annotation` / `update_annotation` / `remove_annotation` / `set_image_status` / `review_summary` / `attach_review_summary`）；`core/prelabel/prelabel.py` 给模型框分配稳定 `box_id`；新增 `/api/prelabel/jobs/{id}/review/{samples,annotations,images,summary}`（6 个接口）与对应 schema；`services_prelabel` 增加复核方法并让 `snapshot()` 带复核汇总；前端新增 `components/PrelabelReview.tsx`（工具栏 / 缩略图列表 / 键盘快捷键）与 `components/BoxEditor.tsx`（拖动、四角缩放、拖拽画框、`vector-effect` 保持屏幕线宽），`PrelabelWizard` 第 2 步改为真编辑器。**血缘不掩盖**：模型框 `model_prediction`、人改的 `review=edited`+留 `model_bbox`、人加的 `source=human_review`，增删改计数写进 `dataset_card.json` 的 `prelabel.review`。新增风险 **R-49**（改动只在内存）。测试 `test_prelabel` 97 → **152 断言**；全量 11 文件 **1146 断言** 通过 + `npm run build` 通过 |
+| 2026-10-14 | 新增 **`scripts/install-gpu.ps1`**：把 venv 里的 CPU 版 torch 换成 CUDA 版，让有 N 卡的机器上项目能检测到 GPU。流程：读 `nvidia-smi` 的驱动 CUDA 版本 + 显卡 compute capability → **先卸 CPU 版再装**（不卸的话 uv 认为版本号未变而跳过，装了等于没装）→ 装 `nvidia-ml-py`（GPU 利用率面板）→ 真跑一次 1024×1024 矩阵乘法确认 kernel 可用。**Blackwell（sm_120，RTX 50 系）必须 cu128+**，否则 `cuda_available=True` 但 kernel 跑不起来，脚本对这种组合直接拒绝并提示升级驱动。参数：`-Index` / `-Yes` / `-DryRun` / `-SkipMonitor`。同步更新 `docs/getting-started.md`（新增「让项目检测到 GPU」小节、「部署到另一台机器」一节指向脚本）、`README.md`、`backend/requirements.txt`（Blackwell 提示 + `nvidia-ml-py` 包名）、`docs/HANDOFF.md`；新增风险 **R-50**（脚本仅 Windows 版——Linux 的 PyPI 默认 torch 已带 CUDA，不需要这一步）。**期间修掉一个只有真跑才暴露的 bug**：`& nvidia-smi --query-gpu=name,compute_cap,...` 不加引号时被 PowerShell 参数模式按逗号拆成多个参数，查询静默失败、显卡名被解析成标题行 |

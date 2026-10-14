@@ -30,14 +30,8 @@ import {
   WarningOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
-import type {
-  ExportReport,
-  InferFormatInfo,
-  InferWeightItem,
-  PrelabelJob,
-  SampleImage,
-} from '../types'
-import { SampleGrid } from '../components/SampleGrid'
+import type { ExportReport, InferFormatInfo, InferWeightItem, PrelabelJob } from '../types'
+import PrelabelReview from '../components/PrelabelReview'
 
 const { Text, Paragraph } = Typography
 
@@ -89,7 +83,6 @@ export default function PrelabelWizard() {
 
   const [step, setStep] = useState(0)
   const [job, setJob] = useState<PrelabelJob | null>(null)
-  const [samples, setSamples] = useState<SampleImage[]>([])
   const [sampleCategories, setSampleCategories] = useState<string[]>([])
   const [starting, setStarting] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -127,11 +120,10 @@ export default function PrelabelWizard() {
 
   const refreshSamples = useCallback(async (id: string) => {
     try {
-      const res = await api.prelabelSamples(id, 0, 12)
-      setSamples(res.images)
+      const res = await api.prelabelSamples(id, 0, 1)
       setSampleCategories(res.categories)
     } catch {
-      setSamples([])
+      setSampleCategories([])
     }
   }, [])
 
@@ -188,7 +180,6 @@ export default function PrelabelWizard() {
         limit: values.limit,
       })
       setJob(res.job)
-      setSamples([])
       setExportReport(null)
       setStep(1)
       startPolling(res.job.id)
@@ -204,7 +195,6 @@ export default function PrelabelWizard() {
   const reset = () => {
     stopPolling()
     setJob(null)
-    setSamples([])
     setExportReport(null)
     setStep(0)
   }
@@ -608,24 +598,9 @@ export default function PrelabelWizard() {
           )}
 
           {job.status === 'finished' && (
-            <Card
-              title={`预测框预览（前 ${samples.length} 张）`}
-              size="small"
-              style={{ marginTop: 16 }}
-              extra={
-                <Space>
-                  {sampleCategories.map((c) => (
-                    <Tag key={c}>{c}</Tag>
-                  ))}
-                </Space>
-              }
-            >
-              {samples.length ? (
-                <SampleGrid samples={samples} categories={sampleCategories} />
-              ) : (
-                <Empty description="没有可预览的样本" />
-              )}
-            </Card>
+            <div style={{ marginTop: 16 }}>
+              <PrelabelReview job={job} categories={sampleCategories} onChanged={loadJobs} />
+            </div>
           )}
         </>
       )}

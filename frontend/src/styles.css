@@ -104,6 +104,86 @@ body {
   gap: 4px;
 }
 
+/* ---------- 预标注复核编辑器（M7-04） ---------- */
+
+.box-editor {
+  border: 1px solid #303030;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.box-editor img {
+  pointer-events: none;
+}
+
+.box-editor-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.review-list {
+  max-height: 620px;
+  overflow-y: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.review-thumb {
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.review-thumb:hover {
+  background: #fafafa;
+}
+
+.review-thumb.active {
+  background: #e6f4ff;
+  border-color: #91caff;
+}
+
+.review-thumb img {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+  background: #1f1f1f;
+}
+
+.review-thumb-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.review-thumb-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.bbox-input {
+  width: 180px;
+  padding: 2px 6px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+}
+
 /* ---------- 日志终端 ---------- */
 
 .log-viewer {

@@ -140,10 +140,16 @@ yolo-studio/
   重型依赖只在训练子进程里 import（测试中用一个子进程断言保证这一点）。
 - **权重**：`.yaml` 结构文件表示从零训练（**离线可用**，不需要下载）；
   `.pt` 优先在 `YOLO_STUDIO_WEIGHTS` 目录按文件名查找，找不到才交给 ultralytics 下载。
+  内置基础模型为 **YOLOv8**（检测 `yolov8n.yaml`、分类 `yolov8-cls.yaml`，留空即用），
+  预训练候选覆盖 n/s/m/l/x。
 - **基础模型可自定义**：新建训练页的权重候选由 `GET /api/train/weights` 汇总——
   内置结构文件/预训练权重、`YOLO_STUDIO_WEIGHTS` 目录里的文件、模型库已注册权重、历史训练产物；
   也可用 `POST /api/train/weights` 上传自己的 `.pt`/`.yaml`（默认不覆盖同名文件，落盘算 sha256）。
   候选里 `exists=false` 的预训练 `.pt` 会在首次训练时联网下载，界面对此有明确标注。
+- **可选超参留空 = 用框架默认**：`lrf` / `cos_lr` / `warmup_epochs` / `label_smoothing` / `dropout` /
+  `freeze` / `close_mosaic` / 数据增强（`mosaic` `mixup` `fliplr` `hsv_*` `scale` `translate`）/
+  `rect` / `cache` / `amp` 等一律用 `null` 表示「不指定」，**只在用户显式设置时才透传给 ultralytics**。
+  这样不会用我们写死的默认值悄悄改掉框架行为（与「缺失指标不补 0」同一条原则）。
 
 训练任务的状态机：
 
@@ -360,6 +366,8 @@ verify：重新计算大小与 sha256，与导出时的基线比对
 批量推理（复用 M6 的常驻推理子进程，一次一张）
       ▼
 统一 IR（每条标注 meta 记 source=model_prediction + 权重 + conf，score 保留置信度）
+      │  复核 / 编辑（M7-04）：人在界面上增删框、改坐标与类别、标记已确认
+      │           模型框 / 人改过的框 / 人加的框在 meta 里可区分
       │  taxonomy / clean / split / export  全部复用现成的
       ▼
 dataset_card.json 的 prelabel 段（权重 / conf / iou / 模型类别 / 生成时间 + 免责说明）
@@ -383,13 +391,33 @@ dataset_card.json 的 prelabel 段（权重 / conf / iou / 模型类别 / 生成
 |---|---|---|
 | GET | `/api/prelabel/formats` / `/weights` | 可推理格式与可选权重（与 M6 共用能力探测） |
 | POST | `/api/prelabel/jobs` | 启动一次预标注（后台任务，立即返回） |
-| GET | `/api/prelabel/jobs` / `/{id}` | 任务列表 / 详情（状态 + 进度 + 报告） |
+| GET | `/api/prelabel/jobs` / `/{id}` | 任务列表 / 详情（状态 + 进度 + 报告 + 复核进度） |
 | GET | `/api/prelabel/jobs/{id}/samples` | 带预测框的预览样本 |
 | POST | `/api/prelabel/jobs/{id}/export` | 生成数据集（类别/清洗/划分/导出） |
 | DELETE | `/api/prelabel/jobs/{id}` | 删除任务（只清内存） |
+| GET | `/api/prelabel/jobs/{id}/review/samples` | 复核样本页（稳定 `box_id` + 复核状态，可筛选） |
+| POST | `/api/prelabel/jobs/{id}/review/annotations` | 新增人工标注（人画的框 / 整图标签） |
+| PATCH | `/api/prelabel/jobs/{id}/review/annotations/{box_id}` | 改坐标 / 类别 |
+| DELETE | `/api/prelabel/jobs/{id}/review/annotations/{box_id}` | 删除标注 |
+| POST | `/api/prelabel/jobs/{id}/review/images/{uid}/status` | 标记「已确认 / 待复核」 |
+| GET | `/api/prelabel/jobs/{id}/review/summary` | 复核进度统计 |
 
-> 前端向导 `pages/PrelabelWizard.tsx`（步骤 1 选权重与图片 → 步骤 2 预览复核 → 步骤 3 生成数据集）；
+> 前端向导 `pages/PrelabelWizard.tsx`（步骤 1 选权重与图片 → 步骤 2 **复核与修正** → 步骤 3 生成数据集）；
 > CLI：`cli.main prelabel --weights ... --images ... [--out ...]`。
+
+### 复核 / 编辑（M7-04）
+
+预标注的定位是「伪标签必须人工复核」（R-37），M7-04 把这句话变成流程：
+
+- **逐张修正**：`components/BoxEditor.tsx` 支持拖动、四角缩放、拖拽画新框、改类别、
+  手动输入坐标；`components/PrelabelReview.tsx` 提供筛选（待复核 / 我改过的 / 空图…）、
+  缩略图列表、上一张下一张与键盘快捷键（←/→ 翻页、Delete 删除、Enter 确认、D/V 切工具）。
+- **不掩盖血缘**：模型框保留 `source=model_prediction`；人改过的框记 `review=edited`
+  并留下原框 `model_bbox`；人新加的框记 `source=human_review`。
+  增删改计数写进 `dataset_card.json` 的 `prelabel.review` 段——「哪些是模型给的、
+  哪些是人改的、删了多少」一目了然。
+- **坐标安全**：越界**显式夹取**到图像边界，退化框（宽或高 ≤ 0）**拒绝**而非静默接受。
+- **改动只在内存**（R-49）：与预标注任务本身一致，服务重启后重跑即可；导出的数据集才是落盘产物。
 
 ---
 
@@ -423,6 +451,9 @@ dataset_card.json 的 prelabel 段（权重 / conf / iou / 模型类别 / 生成
 - 训练依赖（ultralytics / torch）声明在 `backend/requirements.txt`，随 venv 安装；
 - 所有路径基于项目内相对位置，可用环境变量覆盖；
 - 训练解释器默认当前解释器，用 `YOLO_STUDIO_PYTHON` 可指定其他环境。
+- **有 N 卡的机器**：Windows 上 `requirements.txt` 装的是 CPU 版 torch，用
+  `scripts\install-gpu.ps1` 按驱动支持的 CUDA 版本重装（RTX 50 系必须 cu128+，否则 kernel 跑不起来），
+  并装上 `nvidia-ml-py` 才有 GPU 利用率面板。
 - **可远程/共享部署**：后端生产模式直接托管 `frontend/dist`，单端口同源访问
   （`scripts/start-server.ps1`，默认 `0.0.0.0:8010`）。对外提供服务前必须设
   `YOLO_STUDIO_ALLOWED_ROOTS`（默认不限制读取）——项目自身没有登录鉴权，请配合内网/VPN 或反代。

@@ -262,6 +262,25 @@ class TrainRequest(BaseModel):
     patience: int = 100
     optimizer: str = "auto"
     lr0: Optional[float] = None
+    # ---- 可选训练超参：留空（null）表示用 ultralytics 默认值 ----
+    lrf: Optional[float] = None
+    cos_lr: Optional[bool] = None
+    warmup_epochs: Optional[float] = None
+    label_smoothing: Optional[float] = None
+    dropout: Optional[float] = None
+    freeze: Optional[int] = None
+    close_mosaic: Optional[int] = None
+    mosaic: Optional[float] = None
+    mixup: Optional[float] = None
+    fliplr: Optional[float] = None
+    hsv_h: Optional[float] = None
+    hsv_s: Optional[float] = None
+    hsv_v: Optional[float] = None
+    scale: Optional[float] = None
+    translate: Optional[float] = None
+    rect: Optional[bool] = None
+    cache: Optional[str] = Field(None, description="ram | disk；留空不缓存")
+    amp: Optional[bool] = None
     name: Optional[str] = Field(None, description="任务名/训练目录名，留空自动生成")
     extra: Dict[str, Any] = Field(default_factory=dict, description="透传给 ultralytics 的额外参数")
 
@@ -679,6 +698,7 @@ class PrelabelSamplesResponse(BaseModel):
     total: int = 0
     offset: int = 0
     limit: int = 0
+    filter: str = "all"
     categories: List[str] = Field(default_factory=list)
     images: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -702,3 +722,52 @@ class PrelabelExportResponse(BaseModel):
     out_dir: str
     report: Dict[str, Any]
     job: Dict[str, Any] = Field(default_factory=dict)
+
+
+# ---- M7-04 复核 / 编辑（人工修正伪标签） ----
+
+
+class PrelabelAnnotationRequest(BaseModel):
+    """新增一条人工标注（检测框或图像级标签）。"""
+
+    image_uid: str = Field(..., description="图像 uid")
+    category: str = Field(..., description="类别名")
+    kind: str = Field("bbox", description="bbox（检测框）| image（整图标签）")
+    bbox: Optional[List[float]] = Field(
+        None, description="绝对像素 [x1, y1, x2, y2]；kind=image 时忽略"
+    )
+
+
+class PrelabelAnnotationUpdate(BaseModel):
+    """修改一条标注：坐标与类别都可选，只改传了的。"""
+
+    category: Optional[str] = None
+    bbox: Optional[List[float]] = None
+
+
+class PrelabelImageStatusRequest(BaseModel):
+    """标记某张图的复核状态。"""
+
+    status: str = Field(..., description="pending | confirmed")
+
+
+class PrelabelReviewSampleResponse(BaseModel):
+    ok: bool = True
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    image: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PrelabelReviewPageResponse(BaseModel):
+    ok: bool = True
+    total: int = 0
+    offset: int = 0
+    limit: int = 0
+    filter: str = "all"
+    categories: List[str] = Field(default_factory=list)
+    images: List[Dict[str, Any]] = Field(default_factory=list)
+    summary: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PrelabelReviewSummaryResponse(BaseModel):
+    ok: bool = True
+    summary: Dict[str, Any] = Field(default_factory=dict)

@@ -11,6 +11,14 @@ export interface SampleObject {
   category: string
   kind: 'bbox' | 'image'
   bbox: [number, number, number, number] | null
+  /** 稳定标注 id（预标注复核用；其它来源可能为空） */
+  box_id?: string
+  /** 来源：model_prediction（模型预测）| human_review（人新加） */
+  source?: string
+  /** 复核动作：added（人新加）| edited（人改过） */
+  review?: string
+  /** 模型置信度（预测框才有） */
+  score?: number | null
 }
 
 export interface SampleImage {
@@ -23,6 +31,10 @@ export interface SampleImage {
   group: string | null
   num_objects: number
   objects: SampleObject[]
+  /** 复核状态：pending | confirmed（预标注复核用） */
+  review_status?: string
+  /** 是否有过人工改动（增删改框） */
+  review_touched?: boolean
 }
 
 export interface DatasetStats {
@@ -811,7 +823,28 @@ export interface PrelabelJob {
   progress: { done: number; total: number; current: string }
   report: PrelabelReportData | null
   export: { out_dir: string; report: ExportReport } | null
+  /** 复核进度（人工修正伪标签）；任务未完成时为 null */
+  review: PrelabelReviewSummary | null
   /** 是否已完成、可以进入「生成数据集」这一步 */
   ready: boolean
+}
+
+/** 复核进度汇总（M7-04）。 */
+export interface PrelabelReviewSummary {
+  images_total: number
+  images_confirmed: number
+  images_pending: number
+  /** 有过人工改动的图数 */
+  images_touched: number
+  boxes_total: number
+  /** 仍是模型给的框（含被人改过坐标的） */
+  boxes_model: number
+  /** 人新加的框 */
+  boxes_human_added: number
+  /** 被人改过坐标/类别的框 */
+  boxes_edited: number
+  /** 人删掉的框（累计） */
+  boxes_removed: number
+  reviewed: boolean
 }
 

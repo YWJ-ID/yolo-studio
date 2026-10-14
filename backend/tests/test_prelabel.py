@@ -31,14 +31,23 @@ from PIL import Image  # noqa: E402
 from core.export import ExportConfig, export_yolo  # noqa: E402
 from core.prelabel import (  # noqa: E402
     PRELABEL_PREFIX,
+    REVIEW_CONFIRMED,
+    SOURCE_HUMAN,
     SOURCE_MODEL,
     PrelabelConfig,
+    ReviewError,
+    add_annotation,
     annotate_bundle,
     build_bundle,
     ensure_prelabel_prefix,
     export_name,
+    image_review_status,
     list_images,
+    remove_annotation,
+    review_summary,
     run_prelabel,
+    set_image_status,
+    update_annotation,
 )
 
 _failures: list = []
@@ -467,6 +476,217 @@ def test_export_card() -> None:
         check("prelabel" in card2 and card2["prelabel"] is None, "非预标注数据集 prelabel 为 null")
 
 
+# ---------------------------------------------------------------------------
+# M7-04 复核 / 编辑
+# ---------------------------------------------------------------------------
+
+
+def test_review_core() -> None:
+    print("\n== 复核：增删改坐标 / 类别与汇总 ==")
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        root = tmp / "imgs"
+        _make_images(root, ["a.jpg", "b.jpg"])
+        session = _fake_session(tmp)
+        try:
+            cfg = PrelabelConfig(weights=str(tmp / "fake.pt"), conf=0.4, classes=["cat", "dog"])
+            bundle, report = run_prelabel(root, cfg, session=session)
+        finally:
+            session.stop()
+
+        eq(report.boxes_total, 4, "模型给出 4 个框（2 图 × 2）")
+        # 每个模型框都有稳定且唯一的 box_id（前端按 id 增删改）
+        ids = [a.meta.get("box_id") for a in bundle.annotations]
+        check(all(ids) and len(set(ids)) == 4, "模型框都有唯一 box_id")
+
+        s = review_summary(bundle)
+        eq(s["boxes_model"], 4, "初始 4 个模型框")
+        eq(s["boxes_human_added"], 0, "初始无人加框")
+        eq(s["images_pending"], 2, "初始 2 张待复核")
+        eq(s["reviewed"], False, "未复核完")
+
+        image = next(iter(bundle.images.values()))
+        first = bundle.annotations_of(image.uid)[0]
+
+        # 改类别
+        update_annotation(bundle, first.meta["box_id"], category="bird")
+        eq(first.category, "bird", "改类别生效")
+        eq(first.meta["review"], "edited", "改动标记为 edited")
+        # 改坐标（第一次改坐标时留下模型原框，便于追溯「模型原本标在哪」）
+        update_annotation(bundle, first.meta["box_id"], bbox=[10, 10, 20, 20])
+        eq(first.bbox.as_tuple(), (10.0, 10.0, 20.0, 20.0), "改坐标生效")
+        eq(
+            first.meta["model_bbox"],
+            {"x1": 1.0, "y1": 2.0, "x2": 30.0, "y2": 40.0},
+            "留下模型原框便于追溯",
+        )
+
+        # 新增人框
+        added = add_annotation(bundle, image.uid, "cat", [50, 50, 90, 70])
+        eq(added.meta["source"], SOURCE_HUMAN, "人加框来源标记为 human_review")
+        eq(added.kind, "bbox", "人加框是检测框")
+
+        # 越界坐标显式夹取到图像边界
+        clamped = add_annotation(bundle, image.uid, "dog", [-5, -5, 999, 999])
+        eq(
+            clamped.bbox.as_tuple(),
+            (0.0, 0.0, float(image.width), float(image.height)),
+            "越界框夹取到图像边界",
+        )
+
+        # 退化框 / 空类别被拒绝
+        for bad, msg in (
+            (lambda: add_annotation(bundle, image.uid, "dog", [10, 10, 10, 50]), "退化框（宽为 0）被拒绝"),
+            (lambda: add_annotation(bundle, image.uid, "  ", [1, 1, 2, 2]), "空类别被拒绝"),
+            (lambda: add_annotation(bundle, image.uid, "dog", [1, 2, 3]), "bbox 不是 4 个数被拒绝"),
+        ):
+            try:
+                bad()
+                check(False, msg)
+            except ReviewError:
+                check(True, msg)
+
+        # 删除一个人框
+        remove_annotation(bundle, added.meta["box_id"])
+        eq(len(bundle.annotations_of(image.uid)), 3, "删除后该图剩 3 个框")
+
+        # 标记已确认
+        set_image_status(bundle, image.uid, REVIEW_CONFIRMED)
+        eq(image_review_status(image), REVIEW_CONFIRMED, "标记已确认")
+
+        s = review_summary(bundle)
+        eq(s["boxes_human_added"], 1, "人加框剩 1（另一个已删）")
+        eq(s["boxes_edited"], 1, "编辑过 1 个框")
+        eq(s["boxes_removed"], 1, "删除计数累计 1")
+        eq(s["boxes_model"], 4, "编辑不改变「模型框」的来源计数")
+        eq(s["images_confirmed"], 1, "已确认 1 张")
+        eq(s["images_touched"], 1, "改动过 1 张图")
+
+        # 汇总写进血缘（导出卡片刻录用）
+        check("review" in bundle.meta["prelabel"], "汇总写回 prelabel 血缘")
+        eq(bundle.meta["prelabel"]["review"]["boxes_removed"], 1, "血缘里记下删除数")
+
+        # 导出后 dataset_card 的 prelabel.review 段落盘
+        out = tmp / "prelabel_review_out"
+        export_yolo(bundle, out, ExportConfig())
+        card = json.loads((out / "dataset_card.json").read_text(encoding="utf-8"))
+        eq(card["prelabel"]["review"]["boxes_removed"], 1, "dataset_card 记录删除数")
+        eq(card["prelabel"]["review"]["images_confirmed"], 1, "dataset_card 记录已确认数")
+        eq(card["prelabel"]["review"]["boxes_human_added"], 1, "dataset_card 记录人加框数")
+
+
+def test_review_api() -> None:
+    print("\n== 复核 API：增删改状态与错误路径 ==")
+    try:
+        from fastapi.testclient import TestClient
+    except Exception as exc:
+        check(False, f"TestClient 不可用: {exc}")
+        return
+
+    from app import services_prelabel
+    from app.main import app
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        root = tmp / "imgs"
+        _make_images(root, ["a.jpg"])
+        session = _fake_session(tmp)
+        try:
+            cfg = PrelabelConfig(weights=str(tmp / "fake.pt"), classes=["cat", "dog"])
+            bundle, _report = run_prelabel(root, cfg, session=session)
+        finally:
+            session.stop()
+
+        job = services_prelabel.PrelabelJob(
+            id="pl_review_test",
+            status=services_prelabel.STATUS_FINISHED,
+            images_dir=str(root),
+            weights=str(tmp / "fake.pt"),
+            classes=["cat", "dog"],
+        )
+        job.bundle = bundle
+        services_prelabel._jobs["pl_review_test"] = job
+
+        try:
+            client = TestClient(app)
+            base = "/api/prelabel/jobs/pl_review_test"
+
+            page = client.get(f"{base}/review/samples?limit=10").json()
+            eq(page["total"], 1, "复核样本返回 1 张图")
+            eq(page["summary"]["boxes_total"], 2, "汇总显示 2 个框")
+            box_id = page["images"][0]["objects"][0]["box_id"]
+            check(bool(box_id), "样本对象带 box_id")
+            uid = page["images"][0]["uid"]
+
+            resp = client.post(
+                f"{base}/review/annotations",
+                json={"image_uid": uid, "category": "dog", "bbox": [50, 50, 90, 70]},
+            )
+            eq(resp.status_code, 200, "新增框 200")
+            eq(resp.json()["summary"]["boxes_total"], 3, "新增后共 3 个框")
+            new_id = resp.json()["image"]["objects"][-1]["box_id"]
+
+            resp = client.patch(
+                f"{base}/review/annotations/{new_id}", json={"bbox": [55, 55, 95, 75]}
+            )
+            eq(resp.status_code, 200, "修改框 200")
+            eq(resp.json()["summary"]["boxes_edited"], 1, "修改计数 +1")
+
+            resp = client.patch(f"{base}/review/annotations/{box_id}", json={"category": "bird"})
+            eq(resp.status_code, 200, "改类别 200")
+
+            resp = client.delete(f"{base}/review/annotations/{new_id}")
+            eq(resp.status_code, 200, "删除框 200")
+            eq(resp.json()["summary"]["boxes_removed"], 1, "删除计数 +1")
+
+            resp = client.post(f"{base}/review/images/{uid}/status", json={"status": "confirmed"})
+            eq(resp.status_code, 200, "标记状态 200")
+            eq(resp.json()["summary"]["images_confirmed"], 1, "已确认数 +1")
+            eq(resp.json()["image"]["review_status"], "confirmed", "返回图带复核状态")
+
+            eq(client.get(f"{base}/review/summary").status_code, 200, "复核汇总 200")
+            eq(
+                client.get(f"{base}/review/samples?filter=edited").json()["total"],
+                1,
+                "按 edited 过滤能筛出改动过的图",
+            )
+
+            # 错误路径
+            eq(
+                client.post(
+                    f"{base}/review/annotations",
+                    json={"image_uid": "nope", "category": "d", "bbox": [1, 1, 2, 2]},
+                ).status_code,
+                404,
+                "图像不存在 404",
+            )
+            eq(
+                client.patch(f"{base}/review/annotations/nope", json={"category": "x"}).status_code,
+                404,
+                "标注不存在 404",
+            )
+            eq(
+                client.post(f"{base}/review/images/{uid}/status", json={"status": "bogus"}).status_code,
+                400,
+                "非法复核状态 400",
+            )
+            eq(
+                client.post(
+                    f"{base}/review/annotations",
+                    json={"image_uid": uid, "category": "d", "bbox": [10, 10, 10, 40]},
+                ).status_code,
+                400,
+                "退化框 400",
+            )
+            eq(
+                client.get("/api/prelabel/jobs/pl_none/review/summary").status_code,
+                404,
+                "任务不存在 404",
+            )
+        finally:
+            services_prelabel._jobs.pop("pl_review_test", None)
+
+
 def test_api_surface() -> None:
     print("\n== API：路由与错误路径（不加载模型）==")
     try:
@@ -517,6 +737,12 @@ def test_export_surface() -> None:
         "run_prelabel",
         "ensure_prelabel_prefix",
         "export_name",
+        "review_summary",
+        "add_annotation",
+        "update_annotation",
+        "remove_annotation",
+        "set_image_status",
+        "find_annotation",
     ):
         check(hasattr(mod, name), f"core.prelabel 导出 {name}")
 
@@ -532,6 +758,8 @@ def main() -> int:
     test_classify_branch()
     test_lineage_and_naming()
     test_export_card()
+    test_review_core()
+    test_review_api()
     test_api_surface()
     test_export_surface()
 

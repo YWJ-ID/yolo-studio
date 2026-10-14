@@ -16,13 +16,13 @@
 | **M4 部署导出** | **3/3** | **完成** |
 | M5 前端界面 | **11/11** | **完成**（含 M5-09 路由级分割、M5-10 ECharts 按需引入、M5-11 设置页） |
 | M6 实时验证 | **8/8** | **完成**（含前端页面，已真实浏览器验证） |
-| M7 预标注 | **3/3** | **完成**（core / API / 前端向导 / CLI / 测试 / 血缘） |
+| M7 预标注 | **4/4** | **完成**（core / API / 前端向导 / CLI / 测试 / 血缘 / 复核编辑） |
 
-**测试现状：1031 断言**（11 个测试文件，见第四节）。其余 10 个文件（含 `test_prelabel` 97）**稳定全绿**；
+**测试现状：1146 断言**（11 个测试文件，见第四节）。10 个文件（含 `test_prelabel` 152）**稳定全绿**；
 `test_train.py` 存在一个**环境相关的偶发失败**（单跑约 1/8~1/12，全量连跑约 1/3，**与 M7 无关**，见 R-47）——
 它会让「全量一次跑绿」变成概率事件，别据此怀疑自己刚改的东西。
 
-**下一步任务**：M0~M7 全部完成，完整闭环（数据 → 训练 → 评估 → 模型库 → 导出 → 实时验证 → 预标注）。
+**下一步任务**：M0~M7 全部完成，完整闭环（数据 → 训练 → 评估 → 模型库 → 导出 → 实时验证 → 预标注 → **复核/编辑**）。
 后续可选：M6 视频模式逐帧送检（当前有意未做）；在有浏览器的环境复核 M5/M7 页面交互（R-33）；
 继续压缩 vendor chunk（R-32）；需要时安装 openvino 等可选依赖解锁更多格式。
 
@@ -71,6 +71,7 @@
 | 前端 | React 18 + Ant Design 5 + Vite + ECharts，端口 5173 |
 | 启动（开发） | `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1` |
 | 启动（共享/远程） | `scripts\start-server.ps1`（单端口托管前端，默认 `0.0.0.0:8010`，无热重载） |
+| 换成 GPU 版 torch | `powershell -ExecutionPolicy Bypass -File scripts\install-gpu.ps1`（`-DryRun` 只看计划） |
 
 **要让别的机器访问**（GPU 机器部署的常见用法）：用 `scripts\start-server.ps1`（前端由后端同源托管，
 无 CORS 问题），并注意三件事：① 防火墙放行 8010；② 设 `YOLO_STUDIO_ALLOWED_ROOTS`
@@ -80,6 +81,9 @@
 （浏览器安全上下文要求）。详见 `docs/getting-started.md` 第五节。
 
 **本机无 CUDA** → 训练以 CPU 运行；可视化在无 GPU 时降级为仅 CPU 面板（已实现，见 M2-05）。
+有 N 卡的机器上跑 `scripts\install-gpu.ps1` 即可切到 GPU（会自动卸掉 CPU 版 torch——不卸的话 uv
+认为版本号没变而跳过——并装上 `nvidia-ml-py`）；**RTX 50 系（Blackwell/sm_120）必须 cu128 及以上**，
+脚本对这种组合会拒绝并提示升级驱动（见 R-50）。装完必须**重启后端进程**。
 
 **未安装的可选依赖**（影响能力探测结果，不是 bug）：`openvino` /
 `tensorflow` / `coremltools` / `rknn-toolkit2` 均未安装。
@@ -138,7 +142,8 @@ frontend/src/
 ├── pages/PrelabelWizard.tsx    M7 预标注向导（权重 + 图片 → 预览复核 → 生成数据集）
 ├── pages/Settings.tsx          M5-11 设置（只读配置与环境，数据来自 /api/system/config）
 └── components/                 SampleGrid / ExportStep / StatusTag / MetricsChart /
-                                ResourcePanel / LogViewer / ArtifactGallery / EvalResultView
+                                ResourcePanel / LogViewer / ArtifactGallery / EvalResultView /
+                                BoxEditor / PrelabelReview（M7-04 复核编辑器）
 ```
 
 ### 前端要注意的坑
@@ -170,11 +175,11 @@ cd backend
 .\.venv\Scripts\python.exe tests\test_taxonomy.py    # 69  类别规范化
 .\.venv\Scripts\python.exe tests\test_adapters.py    # 55  COCO / VOC / LabelMe
 .\.venv\Scripts\python.exe tests\test_analytics.py   # 84  统计分析
-.\.venv\Scripts\python.exe tests\test_train.py       # 142 训练模块（调度/指标/日志/资源/产物/API/WS）
-.\.venv\Scripts\python.exe tests\test_eval.py        # 174 评估与模型库（结果归一化/报告/注册/外部导入/对比/API）
+.\.venv\Scripts\python.exe tests\test_train.py       # 199 训练模块（调度/指标/日志/资源/产物/API/WS）
+.\.venv\Scripts\python.exe tests\test_eval.py        # 177 评估与模型库（结果归一化/报告/注册/外部导入/对比/API）
 .\.venv\Scripts\python.exe tests\test_deploy.py      # 103 部署导出（格式探测/哈希校验/生命周期/API/联动）
 .\.venv\Scripts\python.exe tests\test_infer.py       # 97  M6 实时验证（格式/归一化/会话/协议/API/背压/类名来源）
-.\.venv\Scripts\python.exe tests\test_prelabel.py    # 97  M7 预标注（收集/IR/统计/失败跳过/分类/血缘/导出卡片/API）
+.\.venv\Scripts\python.exe tests\test_prelabel.py    # 152 M7 预标注（收集/IR/统计/失败跳过/分类/血缘/导出卡片/**复核增删改/汇总/API**）
 ```
 
 > Windows 控制台是 GBK，含 `²` 等字符的输出会抛 `UnicodeEncodeError`。
@@ -251,8 +256,8 @@ cd backend
 - README.md（架构与设计决策）
 
 M0~M7 已完成：M1 数据模块（12/12）、M2 训练（7/7）、M3 评估与模型库（5/5，含导入外部模型）、
-M4 部署导出（3/3）、M5 前端界面（11/11）、M6 实时验证（8/8）、M7 预标注（3/3）。
-测试 1031 断言（11 个文件；`test_train` 有环境相关偶发，见 R-47），前端 `npm run build` 通过。
+M4 部署导出（3/3）、M5 前端界面（11/11）、M6 实时验证（8/8）、M7 预标注 + 复核（4/4）。
+测试 1146 断言（11 个文件；`test_train` 有环境相关偶发，见 R-47），前端 `npm run build` 通过。
 
 后续可做的事（按需选择，先读 PROGRESS.md 风险表）：
 - M6 视频模式的逐帧送检（当前有意未做）；
@@ -473,11 +478,17 @@ cli 的 infer 子命令        命令行推理（--list-formats / 多图 / --jso
 core/prelabel/
 ├── prelabel.py            list_images / build_bundle / annotate_bundle / run_prelabel
 │                          + attach_lineage / ensure_prelabel_prefix / export_name
+├── review.py              M7-04 复核：add/update/remove_annotation / set_image_status
+│                          / review_summary / attach_review_summary（纯逻辑，操作 IR）
 app/services_prelabel.py   PrelabelJob 后台线程任务（独立 InferSession）+ export_job 复用现成流水线
-app/api/routes/prelabel.py /api/prelabel/*（formats/weights/jobs/samples/export/delete）
-app/schemas.py             PrelabelRequest / PrelabelJobResponse / PrelabelExportRequest ...
-frontend/src/pages/PrelabelWizard.tsx   三步向导（配置 → 预览 → 生成数据集）
-tests/test_prelabel.py     97 断言（假 worker 脚本，不依赖 torch）
+                           + 复核方法（review_samples / *_review_annotation / set_review_status）
+app/api/routes/prelabel.py /api/prelabel/*（formats/weights/jobs/samples/export/delete + review/*）
+app/schemas.py             PrelabelRequest / PrelabelJobResponse / PrelabelExportRequest /
+                           Prelabel*Review*（复核请求与响应）
+frontend/src/pages/PrelabelWizard.tsx    三步向导（配置 → 复核 → 生成数据集）
+frontend/src/components/PrelabelReview.tsx  复核工具栏 / 缩略图列表 / 键盘快捷键
+frontend/src/components/BoxEditor.tsx       交互式框编辑器（拖动 / 四角缩放 / 拖拽画框）
+tests/test_prelabel.py     152 断言（假 worker 脚本，不依赖 torch）
 cli/main.py 的 prelabel    命令行预标注（--out 时顺手导出）
 ```
 
@@ -493,3 +504,11 @@ cli/main.py 的 prelabel    命令行预标注（--out 时顺手导出）
 5. **血缘固定落在 `dataset_card.json` 的 `prelabel` 段**（权重 / conf / iou / 模型类别 / 生成时间 + 免责说明），
    非预标注数据集该键为 `null`。导出目录名强制 `prelabel` 前缀。
 6. **任务存在内存里**（R-45）：服务重启即丢，重跑即可；界面已注明「仅本次后端进程内」。
+7. **复核/编辑（M7-04）不得掩盖血缘**。模型框保留 `source=model_prediction`；人改过的框记
+   `review=edited` 并留下原框 `model_bbox`；人新加的框记 `source=human_review`；
+   删除数（框已不存在，无法从 IR 反推）累计在 `bundle.meta`，导出时落进 `dataset_card` 的
+   `prelabel.review`。**不要**为了「好看」把改动后的框统一重标成模型预测——那正好违背 R-37。
+   改动的坐标在 `core/prelabel/review.py` 里统一校验：越界显式夹取、退化框拒绝。
+8. **前端框编辑的坐标换算**：`components/BoxEditor.tsx` 用「容器按图像宽高比布局 + SVG
+   `preserveAspectRatio="none"`」做线性映射。**不要**改成 `object-fit: contain`——那会引入
+   黑边偏移（R-43 就是这么踩出来的）。标注 id 用后端下发的 `box_id`，不要用列表下标。
