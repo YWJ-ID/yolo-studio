@@ -41,9 +41,23 @@ import type {
   WeightUploadResponse,
 } from '../types'
 
+/**
+ * 请求超时（毫秒），默认 5 分钟。
+ *
+ * scan / clean / split / export 这几个接口是同步的，大一点的数据集单次要跑几分钟
+ * （实测约 1~2.5 ms/张），原来的 120 秒会在界面上直接报超时。
+ * 用 VITE_API_TIMEOUT 覆盖；Vite 开发代理读同一个变量（见 vite.config.ts）。
+ */
+const DEFAULT_TIMEOUT_MS = 300000
+
+function readTimeoutMs(): number {
+  const n = Number(import.meta.env.VITE_API_TIMEOUT)
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TIMEOUT_MS
+}
+
 const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE ?? '',
-  timeout: 120000,
+  timeout: readTimeoutMs(),
 })
 
 // 统一错误信息提取

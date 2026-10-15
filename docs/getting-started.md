@@ -405,6 +405,7 @@ $env:YOLO_STUDIO_CORS_ORIGINS = "http://192.168.1.20:5173"   # 分号或逗号�
 | **读取白名单** | `YOLO_STUDIO_ALLOWED_ROOTS="D:\datasets;D:\models"`。默认**空 = 不限制**，任何人都能读服务器上任意文件 |
 | **认证** | 本项目**没有登录/鉴权**。只在内网/VPN 用，或在前面套反代（Nginx/Caddy）做 Basic Auth |
 | CORS | 默认走 Vite 代理 = 同源，**不需要**；仅当 `VITE_API_BASE` 让前端直连后端时才需要（见上）。单端口同源也不需要 |
+| 请求超时 | 数据管道的 `scan`/`clean`/`split`/`export` 是**同步**接口，可能跑好几分钟。前端默认已放宽到 **5 分钟**（`VITE_API_TIMEOUT`）；用反代时 **nginx 的 `proxy_read_timeout` 默认只有 60s，必须一起调**，否则最先断的是它（见第六节） |
 
 ### 摄像头（实时验证）需要 HTTPS
 
@@ -421,6 +422,57 @@ $env:YOLO_STUDIO_CORS_ORIGINS = "http://192.168.1.20:5173"   # 分号或逗号�
 - 血缘/路径都是写在 JSON 里的**绝对路径**。把别处的 `storage/` 直接拷过来会因盘符/路径不同而失效：
   建议在服务器上重新接入数据，或用 `YOLO_STUDIO_*` 把各目录指到实际位置后重新注册。
 - 关掉浏览器不影响训练/评估（服务端子进程）；但**后端进程要常驻**，重启后能接管仍在跑的进程。
+
+---
+
+## 六、大数据集（十万张量级）
+
+数据管道的五个接口 —— `scan` / `clean` / `split` / `export` / `browse` —— 是**同步**的：
+在请求里跑完才返回，**没有后台任务、没有进度**（训练/评估/部署/预标注则相反，是子进程 + WebSocket 进度，
+不受数据集大小影响）。另外 `/api/datasets/browse` 每次请求都会**重新读一遍全量数据**，没有缓存。
+
+实测每张图的边际耗时（本机，640×480，扣掉进程启动开销；真实图更大，磁盘 I/O 部分会更高）：
+
+| 步骤 | 每张 | 10 万张 | 20 万张 |
+|---|---|---|---|
+| `scan`（接入 IR） | 0.94 ms | ≈ 1.6 min | ≈ 3.1 min |
+| `clean`（解码校验 + 完全重复） | 2.52 ms | ≈ 4.2 min | ≈ 8.4 min |
+| `clean --no-verify` | 1.50 ms | ≈ 2.5 min | ≈ 5 min |
+| `export --file-mode hardlink` | 2.21 ms | ≈ 3.7 min | ≈ 7.4 min |
+
+> 上表的 `clean` 关掉了近似重复检测（`--no-near`）；**默认是开着的，会更慢**。
+
+### 超时：一处配置
+
+前端 axios 与 Vite 开发代理都读同一个环境变量，默认 **5 分钟**：
+
+```powershell
+$env:VITE_API_TIMEOUT = "900000"   # 毫秒；前端 dev server 与构建都读它
+```
+
+- 改了要**重启 vite**（dev）或**重新 `npm run build`**（生产，值在构建时写进产物）；
+- 用了反代的话，nginx 侧还要 `proxy_read_timeout 900s;`（默认 60s，最先断的就是它）；
+- 生产单端口模式（后端托管前端）只有 axios 这一处。
+
+### 建议：十万张以上走 CLI
+
+同步接口在大数据集上的体验就是「长时间白屏」，所以处理这种包用命令行更稳（有输出、没有 HTTP 超时）：
+
+```powershell
+cd backend
+# 体检（默认 dry-run，不改数据），--no-near 可先快速过一遍
+.\.venv\Scripts\python.exe -m cli.main clean "<数据集根>" --no-near --show 20
+# 合成 + 划分 + 导出；hardlink 不额外占盘（要求与源数据同一块盘）
+.\.venv\Scripts\python.exe -m cli.main export "<数据集根>" --out "E:\datasets\_studio\ds_v1" --file-mode hardlink
+```
+
+两个配套提醒：
+
+- **训练不必先有项目版本**：新建训练页的「数据集 data.yaml」是 AutoComplete，可以直接粘**任意绝对路径**
+  （`TrainNew.tsx`），训练本身是后台子进程 + WebSocket 进度。
+- **GPU 训练记得调 `workers`**：默认 `0`（Windows 保守值）会让数据加载喂不满 GPU，N 卡上建议 4~8；
+  `cache` 默认不缓存，十万张量级不要开（除非内存足够）。
+- 本机实测过的最大规模是 **9884 图 / 23389 框**（DMS 检测数据集），更大规模请按上表估算时间。
 
 ---
 

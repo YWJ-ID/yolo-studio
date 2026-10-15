@@ -8,7 +8,7 @@
 - 技术栈：FastAPI (Python 3.9) + React 18 + Ant Design 5 + ECharts
 - 数据存储：文件系统（数据集版本自带的 `dataset_card.json` 记录血缘，无需数据库）
 - 训练后端：ultralytics（一期），预留 `TrainerBackend` 抽象
-- 最近更新：2026-10-14
+- 最近更新：2026-10-15
 
 > 新会话/新协作者请先读 [`docs/HANDOFF.md`](docs/HANDOFF.md)：
 > 里面有协作约定、环境事实、验证方式与可直接粘贴的续作提示。
@@ -225,6 +225,7 @@
 | R-48 | **外部导入模型的权重只引用、不复制** | 已决策 | `register_external` 把 `.pt` 的原路径记进 `weights.best`，不复制进模型库——与「模型卡只记引用、不复制权重」的既有决策一致（R-26），避免同一模型出现两份文件。代价同训练目录：**原文件被移动/删除后该模型失效**（详情页与列表会显示权重路径，可据此排查）。只支持 `.pt`，因为 ONNX/TorchScript 无法做 ultralytics val，登记进来会让「发起评估」变成坑 |
 | R-49 | **复核编辑（M7-04）的改动只存在内存里** | 已决策 | 复核增删改直接作用于预标注任务内存中的 IR，**不落盘**；服务重启后未导出的复核结果会丢失（与 R-45「预标注任务存在内存里」一致）。理由：复核是「跑一次 → 改 → 导出」的一次性流程，落盘会与数据集存储重复。界面上已注明任务「仅本次后端进程内」。坐标校验：越界**显式夹取**到图像边界、退化框（宽或高 ≤ 0）**拒绝**而不是静默接受——这是编辑动作本身的语义，不是对源数据的静默裁剪 |
 | R-50 | **CUDA torch 的安装脚本只有 Windows 版** | 已决策 | `scripts/install-gpu.ps1` 是 PowerShell 脚本。原因：**Windows 上 PyPI 默认 torch 是 CPU 版**（Linux 默认就带 CUDA），这个坑只存在于 Windows；Linux 需指定版本时按 `docs/getting-started.md` 的两条 `uv pip install --index-url` 手动装即可。脚本含一条硬约束：**Blackwell（compute capability 12.0，如 RTX 50 系）必须 cu128+**，否则 `cuda_available=True` 但 kernel 跑不起来，脚本在这种组合下直接拒绝并提示升级驱动 |
+| R-51 | **数据管道接口是同步的，大数据集只能靠调超时** | 已决策 | `scan` / `clean` / `split` / `export` / `browse` 在请求里同步跑完（**无后台任务、无进度**），且 `browse` 每次请求都重新读全量（`_load_or_400` 无缓存）。本机实测每张成本（640×480，扣启动开销）：`scan` 0.94ms / `clean` 2.52ms（含解码校验，**未含默认开启的近似重复**）/ `export --file-mode hardlink` 2.21ms → 十万张约 1.6 / 4.2 / 3.7 分钟。因此把超时做成**一处配置**：前端 axios 与 Vite 代理同读 `VITE_API_TIMEOUT`（默认 5 分钟）；反代需同步调 `proxy_read_timeout`（nginx 默认 60s 最先断）。**十万张以上建议走 CLI**（无 HTTP 超时且有输出）；界面里 `browse` 翻页仍会全量重扫，属已知限制。真正的解法（IR 缓存 / 改成后台任务）**暂不做**——用户明确选择「只做超时可配」 |
 
 ---
 
@@ -331,6 +332,7 @@
 | 2026-10-12 | 前端 `npm run build`（M7-04 复核界面） | 通过（tsc --noEmit + vite build）；`PrelabelWizard` chunk 60.8 kB（含复核编辑器 `PrelabelReview` + `BoxEditor`） |
 | 2026-10-12 | 全量测试（含 M7-04） | **1146 断言全部通过**（11 个文件：63/89/58/69/55/84/177/103/97/152/199）；本轮 `test_train` 未复现 R-47 偶发 |
 | 2026-10-14 | `scripts/install-gpu.ps1` 的探测逻辑（用假 `nvidia-smi` 桩逐场景**真实执行**） | 8 个场景全部符合预期：RTX 5070 / sm_120 / 驱动 CUDA 13.1 → 选 `cu129`；RTX 3080 / sm_86 / CUDA 12.4 → 选 `cu124`；**Blackwell + 驱动仅 CUDA 12.4 → 拒绝**并提示升级驱动；驱动未报 CUDA 版本 → 要求用 `-Index` 指定；老 `nvidia-smi` 无 `compute_cap` 字段 → 3 列回退可解析；`-Index cu128` 覆盖生效；`-Index cu999` 与「本机无 nvidia-smi」→ 明确报错并退出 1。脚本语法检查通过（PowerShell 5.1） |
+| 2026-10-15 | 超时可配的真实性验证（`VITE_API_TIMEOUT`） | ① `VITE_API_TIMEOUT=12345 npm run build` → 产物 `dist/assets/client-*.js` 里出现 `12345`；不设时回落为 `3e5`（300000）→ env 确实进了 axios 配置；② 起桩后端（固定延迟 5s）+ 真实 `vite` dev server：`VITE_API_TIMEOUT=2000` → 请求在 **2013ms 被掐断**（连接重置），`VITE_API_TIMEOUT=8000` → **HTTP 200、5031ms** 完整返回 → 代理层按同一个值生效；③ `npm run build`（`tsc --noEmit` + `vite build`）通过。**未做**：真实浏览器里 axios 的掐断行为（本机无浏览器，同 R-33）；大数据集本身未真跑（每张成本是 1000 张基准外推） |
 
 ---
 
@@ -421,3 +423,4 @@
 | 2026-10-06 | 补充**训练可选超参（A 档）**：`TrainSpec`/`TrainRequest` 新增 `lrf` `cos_lr` `warmup_epochs` `label_smoothing` `dropout` `freeze` `close_mosaic` `mosaic` `mixup` `fliplr` `hsv_h/s/v` `scale` `translate` `rect` `cache` `amp`（全部 `Optional=None`）；`train_kwargs` 改为「设了才透传」，留空保留 ultralytics 默认；`validate()` 增加 lrf/warmup/freeze 非负与 cache 取值校验；CLI `train` 补齐这些参数（含此前缺失的 `--lr0`）与 `BooleanOptionalAction` 三态开关；前端新建训练页新增「训练策略与正则 / 数据增强 / 工程权衡」三个折叠面板，布尔用「默认/开启/关闭」三态避免误写成 false 覆盖框架默认。测试补可选超参透传、序列化往返与校验断言；全量 11 个测试文件通过 + `npm run build` 通过。注：本轮 `test_train` 复现的既有偶发为 **R-47**（环境/负载相关，与本改动无关） |
 | 2026-10-12 | 完成 **M7-04 复核 / 编辑**（把「伪标签必须人工复核」从文案变成流程）：新增 `core/prelabel/review.py`（纯逻辑：`add_annotation` / `update_annotation` / `remove_annotation` / `set_image_status` / `review_summary` / `attach_review_summary`）；`core/prelabel/prelabel.py` 给模型框分配稳定 `box_id`；新增 `/api/prelabel/jobs/{id}/review/{samples,annotations,images,summary}`（6 个接口）与对应 schema；`services_prelabel` 增加复核方法并让 `snapshot()` 带复核汇总；前端新增 `components/PrelabelReview.tsx`（工具栏 / 缩略图列表 / 键盘快捷键）与 `components/BoxEditor.tsx`（拖动、四角缩放、拖拽画框、`vector-effect` 保持屏幕线宽），`PrelabelWizard` 第 2 步改为真编辑器。**血缘不掩盖**：模型框 `model_prediction`、人改的 `review=edited`+留 `model_bbox`、人加的 `source=human_review`，增删改计数写进 `dataset_card.json` 的 `prelabel.review`。新增风险 **R-49**（改动只在内存）。测试 `test_prelabel` 97 → **152 断言**；全量 11 文件 **1146 断言** 通过 + `npm run build` 通过 |
 | 2026-10-14 | 新增 **`scripts/install-gpu.ps1`**：把 venv 里的 CPU 版 torch 换成 CUDA 版，让有 N 卡的机器上项目能检测到 GPU。流程：读 `nvidia-smi` 的驱动 CUDA 版本 + 显卡 compute capability → **先卸 CPU 版再装**（不卸的话 uv 认为版本号未变而跳过，装了等于没装）→ 装 `nvidia-ml-py`（GPU 利用率面板）→ 真跑一次 1024×1024 矩阵乘法确认 kernel 可用。**Blackwell（sm_120，RTX 50 系）必须 cu128+**，否则 `cuda_available=True` 但 kernel 跑不起来，脚本对这种组合直接拒绝并提示升级驱动。参数：`-Index` / `-Yes` / `-DryRun` / `-SkipMonitor`。同步更新 `docs/getting-started.md`（新增「让项目检测到 GPU」小节、「部署到另一台机器」一节指向脚本）、`README.md`、`backend/requirements.txt`（Blackwell 提示 + `nvidia-ml-py` 包名）、`docs/HANDOFF.md`；新增风险 **R-50**（脚本仅 Windows 版——Linux 的 PyPI 默认 torch 已带 CUDA，不需要这一步）。**期间修掉一个只有真跑才暴露的 bug**：`& nvidia-smi --query-gpu=name,compute_cap,...` 不加引号时被 PowerShell 参数模式按逗号拆成多个参数，查询静默失败、显卡名被解析成标题行 |
+| 2026-10-15 | **大数据集超时可配**：`frontend/src/api/client.ts` 的 axios 超时与 `frontend/vite.config.ts` 的代理超时（新增 `timeout` / `proxyTimeout`）改为同读 `VITE_API_TIMEOUT`，默认 **120s → 5 分钟**（非法值/未设时回落默认，避免 `Number("")` 之类把超时变成 0=不限时）；`docs/getting-started.md` 新增「六、大数据集（十万张量级）」（实测每张成本表、超时一处配置、CLI 建议、workers/hardlink 提醒），并在「必做的几件事」里补上反代 `proxy_read_timeout` 默认 60s 的提醒；新增风险 **R-51**。**更正**：此前判断「Node 18+ 的 `server.requestTimeout` 默认 300s 会切断长响应」**有误**——该值管的是「接收完整个请求」，`server.timeout` 默认 0（不限时），因此 Vite 代理默认不掐断长响应；实测确认掐断只发生在 axios 与 nginx 两层 |
