@@ -441,6 +441,8 @@ def test_stop_and_resume(tmp: Path) -> None:
 
         resumed = manager2.resume("job_resume")
         eq(resumed.attempts, 2, "续训后尝试次数为 2")
+        # 回归：续训必须以断点权重作为模型，否则 ultralytics 会静默地从零重跑全部 epochs
+        eq(Path(resumed.spec.get("weights", "")).name, "last.pt", "续训改用 last.pt 作为模型权重")
         second = wait_terminal(manager2, "job_resume")
         eq(second.status, STATUS_FINISHED, "续训完成")
         eq(second.metrics_rows, 4, "两段训练的轮次合并（2+2）")

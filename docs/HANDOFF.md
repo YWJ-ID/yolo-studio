@@ -18,7 +18,7 @@
 | M6 实时验证 | **8/8** | **完成**（含前端页面，已真实浏览器验证） |
 | M7 预标注 | **4/4** | **完成**（core / API / 前端向导 / CLI / 测试 / 血缘 / 复核编辑） |
 
-**测试现状：1146 断言**（11 个测试文件，见第四节）。10 个文件（含 `test_prelabel` 152）**稳定全绿**；
+**测试现状：1147 断言**（11 个测试文件，见第四节）。10 个文件（含 `test_prelabel` 152）**稳定全绿**；
 `test_train.py` 存在一个**环境相关的偶发失败**（单跑约 1/8~1/12，全量连跑约 1/3，**与 M7 无关**，见 R-47）——
 它会让「全量一次跑绿」变成概率事件，别据此怀疑自己刚改的东西。
 
@@ -175,7 +175,7 @@ cd backend
 .\.venv\Scripts\python.exe tests\test_taxonomy.py    # 69  类别规范化
 .\.venv\Scripts\python.exe tests\test_adapters.py    # 55  COCO / VOC / LabelMe
 .\.venv\Scripts\python.exe tests\test_analytics.py   # 84  统计分析
-.\.venv\Scripts\python.exe tests\test_train.py       # 199 训练模块（调度/指标/日志/资源/产物/API/WS）
+.\.venv\Scripts\python.exe tests\test_train.py       # 200 训练模块（调度/指标/日志/资源/产物/API/WS/续训用 last.pt）
 .\.venv\Scripts\python.exe tests\test_eval.py        # 177 评估与模型库（结果归一化/报告/注册/外部导入/对比/API）
 .\.venv\Scripts\python.exe tests\test_deploy.py      # 103 部署导出（格式探测/哈希校验/生命周期/API/联动）
 .\.venv\Scripts\python.exe tests\test_infer.py       # 97  M6 实时验证（格式/归一化/会话/协议/API/背压/类名来源）
@@ -306,7 +306,7 @@ tests/fixtures/fake_trainer.py   假训练进程
 tests/fixtures/make_tiny_det.py  真训练冒烟数据集生成器
 ```
 
-### 两个必须知道的坑（已修复，改动前先读）
+### 三个必须知道的坑（已修复，改动前先读）
 
 1. **`project` 必须传绝对路径**（R-19）。
    ultralytics 对相对 `project` 会拼上它自己的 `SETTINGS["runs_dir"]`，
@@ -317,6 +317,13 @@ tests/fixtures/make_tiny_det.py  真训练冒烟数据集生成器
 2. **`data.yaml` 的 `path` 也建议绝对路径**（R-20）。
    ultralytics 解析相对 `path` 的基准不是 yaml 所在目录。本项目导出器写的是绝对路径；
    手工数据集请照 `tests/fixtures/make_tiny_det.py` 写绝对 `path`。
+
+3. **续训必须以 `last.pt` 作为模型**（R-52）。
+   ultralytics 只有 **`model=weights/last.pt` 且 `resume=True`** 时才真正接着训；
+   若仍传原始权重（`.yaml` / 预训练 `.pt`），它会**静默地从头再跑一遍全部 epochs**
+   （并删掉旧 `results.csv`），表现为「续训后还要再训 N 轮」。
+   `TrainingManager.resume()` 已把 `spec.weights` 换成 `run_dir/weights/last.pt`，
+   不要改回原始权重。
 
 ### 其它约定
 

@@ -358,6 +358,11 @@ class TrainingManager:
 
         spec = TrainSpec.from_dict(rt.job.spec)
         spec.resume = True
+        # 续训必须以**断点权重**作为模型：ultralytics 只有在 model=last.pt 且 resume=True 时
+        # 才真正接着训；若仍传原始权重（.yaml/.pt），它会静默地从零再跑一遍全部 epochs
+        # （见 ultralytics engine/model.py 的 resume 分支）。这里把它换成 last.pt，
+        # 后续 train_kwargs / 日志 / train_spec.json 都自然指向断点权重。
+        spec.weights = str(last)
         for key, value in overrides.items():
             if value is not None and hasattr(spec, key):
                 setattr(spec, key, value)
