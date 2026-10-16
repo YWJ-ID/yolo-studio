@@ -55,7 +55,8 @@ export default function ResourcePanel({ sample, monitor }: Props) {
               {proc && (
                 <div style={{ marginTop: 12 }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    训练进程 pid={proc.pid}
+                    训练进程树 pid={proc.pid}
+                    {proc.processes && proc.processes > 1 ? `（含 ${proc.processes} 个进程）` : ''}
                   </Text>
                   <Row gutter={16} style={{ marginTop: 4 }}>
                     <Col span={8}>

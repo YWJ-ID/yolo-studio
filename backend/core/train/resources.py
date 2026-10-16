@@ -86,35 +86,91 @@ class ResourceMonitor:
         return out
 
     def _process(self, pid: Optional[int]) -> Optional[Dict[str, Any]]:
+        """采样训练进程**整棵树**的占用。
+
+        为什么要走进程树：Windows 上 venv 的 `python.exe` 是个外壳，会把真正的
+        解释器作为**子进程**启动（实测外壳只有几 MB、1 个线程），只采 `pid` 一个进程
+        会严重低估 CPU / 内存。开启 `workers>0` 时还会再多出 dataloader 子进程，
+        同样属于这次训练的开销。
+        """
         if not self._psutil or not pid:
             return None
         psutil = self._psutil
+
+        root = self._get_proc(pid)
+        if root is None:
+            return None
         try:
-            proc = self._procs.get(pid)
-            if proc is None or proc.pid != pid:
-                proc = psutil.Process(pid)
-                self._procs[pid] = proc
-                # 建立 CPU 时间基线，先返回 0
-                proc.cpu_percent(interval=None)
-            if not proc.is_running():
+            if not root.is_running():
                 return None
-            info: Dict[str, Any] = {"pid": pid, "cpu_percent": proc.cpu_percent(interval=None)}
-            try:
-                info["mem_rss"] = proc.memory_info().rss
-                info["mem_percent"] = round(proc.memory_percent(), 2)
-            except Exception:
-                pass
-            try:
-                info["threads"] = proc.num_threads()
-            except Exception:
-                pass
-            try:
-                info["children"] = len(proc.children(recursive=True))
-            except Exception:
-                pass
-            return info
         except Exception:
             return None
+
+        # 收集整棵树的 pid（根 + 递归子进程）
+        pids = [int(pid)]
+        try:
+            pids += [c.pid for c in root.children(recursive=True)]
+        except Exception:
+            pass
+
+        cpu = 0.0
+        mem_rss = 0
+        threads = 0
+        live = 0
+        for p in pids:
+            proc = self._get_proc(p)
+            if proc is None:
+                continue
+            try:
+                if not proc.is_running():
+                    continue
+            except Exception:
+                continue
+            live += 1
+            try:
+                cpu += proc.cpu_percent(interval=None)
+            except Exception:
+                pass
+            try:
+                mem_rss += proc.memory_info().rss
+            except Exception:
+                pass
+            try:
+                threads += proc.num_threads()
+            except Exception:
+                pass
+
+        if live == 0:
+            return None
+        try:
+            mem_total = psutil.virtual_memory().total or 0
+        except Exception:
+            mem_total = 0
+        return {
+            "pid": int(pid),
+            "processes": live,  # 进程树内的进程数（含外壳）
+            "cpu_percent": round(cpu, 1),
+            "mem_rss": mem_rss,
+            "mem_percent": round(mem_rss / mem_total * 100, 2) if mem_total else 0.0,
+            "threads": threads,
+            "children": max(0, live - 1),
+        }
+
+    def _get_proc(self, pid: int):
+        """按 pid 取缓存的 psutil.Process（缓存是为了让 cpu_percent 有时间基线）。"""
+        proc = self._procs.get(pid)
+        if proc is not None and proc.pid == pid:
+            return proc
+        try:
+            proc = self._psutil.Process(pid)
+        except Exception:
+            return None
+        self._procs[pid] = proc
+        try:
+            proc.cpu_percent(interval=None)  # 建立基线，首帧返回 0
+        except Exception:
+            pass
+        return proc
 
     def gpu(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {

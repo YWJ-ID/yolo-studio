@@ -18,7 +18,7 @@
 | M6 实时验证 | **8/8** | **完成**（含前端页面，已真实浏览器验证） |
 | M7 预标注 | **4/4** | **完成**（core / API / 前端向导 / CLI / 测试 / 血缘 / 复核编辑） |
 
-**测试现状：1147 断言**（11 个测试文件，见第四节）。10 个文件（含 `test_prelabel` 152）**稳定全绿**；
+**测试现状：1150 断言**（11 个测试文件，见第四节）。10 个文件（含 `test_prelabel` 152）**稳定全绿**；
 `test_train.py` 存在一个**环境相关的偶发失败**（单跑约 1/8~1/12，全量连跑约 1/3，**与 M7 无关**，见 R-47）——
 它会让「全量一次跑绿」变成概率事件，别据此怀疑自己刚改的东西。
 
@@ -175,7 +175,7 @@ cd backend
 .\.venv\Scripts\python.exe tests\test_taxonomy.py    # 69  类别规范化
 .\.venv\Scripts\python.exe tests\test_adapters.py    # 55  COCO / VOC / LabelMe
 .\.venv\Scripts\python.exe tests\test_analytics.py   # 84  统计分析
-.\.venv\Scripts\python.exe tests\test_train.py       # 200 训练模块（调度/指标/日志/资源/产物/API/WS/续训用 last.pt）
+.\.venv\Scripts\python.exe tests\test_train.py       # 203 训练模块（调度/指标/日志/资源/产物/API/WS/续训用 last.pt）
 .\.venv\Scripts\python.exe tests\test_eval.py        # 177 评估与模型库（结果归一化/报告/注册/外部导入/对比/API）
 .\.venv\Scripts\python.exe tests\test_deploy.py      # 103 部署导出（格式探测/哈希校验/生命周期/API/联动）
 .\.venv\Scripts\python.exe tests\test_infer.py       # 97  M6 实时验证（格式/归一化/会话/协议/API/背压/类名来源）
@@ -339,6 +339,11 @@ tests/fixtures/make_tiny_det.py  真训练冒烟数据集生成器
   服务启动后用 CLI 新增的任务才能被 API 看到。
 - 测试必须隔离：训练/评估用例注入隔离的 registry 并关闭自动评估，
   否则「训练完成自动注册」会把卡片写进真实 `storage/`。
+- **资源面板采的是「进程树」**（R-53）：Windows 上 venv 的 `python.exe` 是外壳，会把真正的
+  解释器作为**子进程**启动（`workers>0` 还会多出 dataloader 子进程），`ResourceMonitor._process`
+  因此聚合「根进程 + 递归子进程」的 CPU/内存/线程。改动时**不要**退回只采单个 `pid`，
+  否则「训练进程」一栏会严重低估（出现过 CPU 0.0% / 内存几 MB 的假象）。
+  「停止训练」用 `kill_tree`（`children(recursive=True)+parent`）按整棵树终止，与采样口径一致。
 
 ---
 

@@ -429,6 +429,8 @@ export interface ResourceSample {
       mem_percent?: number
       threads?: number
       children?: number
+      /** 进程树内的进程数（含 venv 外壳与 dataloader 子进程） */
+      processes?: number
     }
   }
   gpu: { available: boolean; devices: GpuDevice[]; error: string }

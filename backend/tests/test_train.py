@@ -545,6 +545,34 @@ def test_resources(tmp: Path) -> None:
         proc_sample = monitor.sample(os.getpid())
         check("process" in proc_sample["cpu"], "能采样到指定进程")
         eq(proc_sample["cpu"]["process"]["pid"], os.getpid(), "进程 pid 正确")
+
+        # 进程树聚合：venv 的 python.exe 会把真正的解释器作为子进程启动，
+        # 只采 pid 一个进程会严重低估内存/CPU（真实 bug）。这里造一棵
+        # 「父进程 → 子进程分配 80MB」的树，验证采样覆盖了子进程。
+        import subprocess as _sp
+
+        from core.process import kill_tree
+
+        worker_code = "import time; b=bytearray(80*1024*1024); time.sleep(8)"
+        launcher_code = (
+            "import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', " + repr(worker_code) + "]); "
+            "time.sleep(8)"
+        )
+        root = _sp.Popen([sys.executable, "-c", launcher_code])
+        try:
+            time.sleep(2.5)
+            monitor.sample(root.pid)  # 建立 CPU 基线
+            time.sleep(0.5)
+            tree = monitor.sample(root.pid)["cpu"]["process"]
+            check(tree["processes"] >= 2, f"进程树采样覆盖子进程（processes={tree['processes']}）")
+            check(tree["children"] >= 1, "统计到子进程数")
+            check(
+                tree["mem_rss"] >= 80 * 1024 * 1024,
+                f"进程树内存包含子进程（应 >=80MB，实际 {tree['mem_rss']}）",
+            )
+        finally:
+            kill_tree(root.pid)
     finally:
         monitor.close()
 
